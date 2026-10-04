@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>🎤 AI 프레젠터</title>
+<style>
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+:root{
+  --bg:#080b12;--bg2:#0d1119;--surface:#111522;--surface2:#161b2c;--line:#1e2538;--line2:#2a3350;
+  --txt:#f0f3f9;--txt2:#c0c9dd;--mut:#68738e;--mut2:#4a5570;
+  --pri:#6366f1;--pri2:#818cf8;--pri-bg:rgba(99,102,241,.12);--pri-bd:rgba(99,102,241,.3);
+  --ok:#34d399;--ok-bg:rgba(52,211,153,.1);--warn:#fbbf24;--warn-bg:rgba(251,191,36,.08);
+  --err:#f87171;--r-s:8px;--r-m:12px;--r-l:16px;--r-xl:20px;
+  --panelW:340px;--blur:blur(20px);
+  --shadow-s:0 1px 3px rgba(0,0,0,.4);--shadow-m:0 4px 16px rgba(0,0,0,.35);--shadow-l:0 12px 40px rgba(0,0,0,.5);
+  --ease:cubic-bezier(.4,0,.2,1);--ease-spring:cubic-bezier(.34,1.56,.64,1);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+*::-webkit-scrollbar{width:6px;height:6px}
+*::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
+*::-webkit-scrollbar-track{background:transparent}
+body{margin:0;font-family:'Pretendard Variable',Pretendard,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt);overflow:hidden;height:100vh;height:100dvh;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+
+/* 애니메이션 */
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:none;opacity:1}}
+
+/* 상단 바 */
+.topBar{display:flex;align-items:center;gap:10px;padding:0 16px;background:var(--bg2);border-bottom:1px solid var(--line);height:52px;position:relative;z-index:30;backdrop-filter:var(--blur)}
+.topBar h1{font-size:.95rem;font-weight:700;margin:0;flex:1;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
+.topBar h1 svg{opacity:.8}
+.iconBtn{width:34px;height:34px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface);color:var(--mut);cursor:pointer;font-size:.9rem;display:flex;align-items:center;justify-content:center;transition:all .15s var(--ease)}
+.iconBtn:hover{color:var(--txt);border-color:var(--pri);background:var(--pri-bg);box-shadow:0 0 0 3px var(--pri-bg)}
+.acctMenu{display:none;position:absolute;top:100%;right:0;margin-top:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-m);box-shadow:var(--shadow-m);min-width:150px;z-index:50;overflow:hidden}
+.acctMenu.show{display:block}
+.acctMenu a{display:block;padding:10px 14px;font-size:.82rem;color:var(--txt2);text-decoration:none}
+.acctMenu a:hover{background:var(--pri-bg);color:var(--txt)}
+.iconBtn:active{transform:scale(.95)}
+
+/* 메인 레이아웃 */
+.main{display:flex;height:calc(100vh - 52px);height:calc(100dvh - 52px);position:relative}
+
+/* 슬라이드 영역 */
+.slideWrap{flex:1;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 30%,var(--bg2) 0%,var(--bg) 70%);position:relative;overflow:hidden;transition:margin .35s var(--ease)}
+.slideWrap.panelOpen{margin-right:var(--panelW)}
+.slideContent{width:100%;height:100%;padding:48px 64px 96px;overflow-y:auto;animation:fadeIn .4s var(--ease)}
+.slideContent h2{font-size:clamp(1.4rem,4vw,2rem);margin:0 0 28px;color:#fff;font-weight:800;letter-spacing:-.03em;line-height:1.3;padding-bottom:16px;position:relative}
+.slideContent h2::after{content:'';position:absolute;bottom:0;left:0;width:48px;height:3px;background:linear-gradient(90deg,var(--pri),var(--pri2));border-radius:2px}
+.slideContent ul{line-height:2.1;font-size:clamp(.92rem,2vw,1.1rem);color:var(--txt2);padding-left:20px;margin:0;list-style:none}
+.slideContent li{padding-left:20px;position:relative;margin-bottom:4px}
+.slideContent li::before{content:'';position:absolute;left:0;top:calc(1em - 2px);width:6px;height:6px;border-radius:50%;background:var(--pri);opacity:.6}
+.slideContent img{max-width:88%;border-radius:var(--r-m);margin:16px auto;display:block;box-shadow:var(--shadow-m);border:1px solid var(--line)}
+.slideContent .note{background:var(--pri-bg);border:1px solid var(--pri-bd);border-radius:var(--r-m);padding:14px 18px;margin-top:24px;color:var(--mut);font-size:.82rem;line-height:1.6}
+.slideCanvas{position:relative;width:100%;margin:0 auto;overflow:hidden}
+.slideShapeImg,.slideShapeTitle,.slideShapeText{position:absolute}
+.slideShapeImg{object-fit:contain}
+.slideShapeTitle{color:#fff;font-weight:800;letter-spacing:-.03em;line-height:1.25;overflow:hidden}
+.slideShapeText{color:var(--txt2);line-height:1.5;white-space:pre-wrap;overflow:hidden}
+
+/* 우측 패널 */
+.sidePanel{position:absolute;right:0;top:0;bottom:0;width:var(--panelW);background:var(--surface);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .35s var(--ease);display:flex;flex-direction:column;z-index:5;box-shadow:var(--shadow-l)}
+.sidePanel.open{transform:translateX(0)}
+.pHead{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;font-size:.8rem;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
+.scriptBox{flex:1;padding:16px;overflow-y:auto;font-size:.8rem;line-height:1.7;color:var(--txt2);white-space:pre-wrap;border-bottom:1px solid var(--line)}
+.qaBox{margin:10px 14px;padding:12px 16px;background:var(--warn-bg);border:1px solid rgba(251,191,36,.2);border-radius:var(--r-m);font-size:.76rem;line-height:1.6;color:var(--warn);display:none;max-height:160px;overflow-y:auto}
+.slideList{max-height:220px;overflow-y:auto}
+.sldItem{display:flex;gap:10px;padding:10px 16px;cursor:pointer;font-size:.76rem;color:var(--mut);align-items:center;transition:all .12s var(--ease);border-left:2px solid transparent}
+.sldItem:hover{background:var(--surface2);color:var(--txt2)}
+.sldItem.cur{color:var(--pri);font-weight:700;background:var(--pri-bg);border-left-color:var(--pri)}
+.sldItem .num{min-width:24px;font-weight:700;font-variant-numeric:tabular-nums}
+
+/* 컨트롤 바 */
+.ctrlBar{position:absolute;bottom:0;left:0;right:0;padding:14px 24px 8px;background:linear-gradient(transparent,var(--bg) 60%);display:flex;align-items:center;gap:12px;z-index:8;transition:opacity .3s var(--ease),transform .3s var(--ease)}
+.ctrlBar.hidden{opacity:0;pointer-events:none;transform:translateY(8px)}
+.ctrBtn{padding:10px 14px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface);color:var(--txt2);cursor:pointer;font-size:.85rem;font-weight:600;transition:all .15s var(--ease);backdrop-filter:var(--blur)}
+.ctrBtn:hover{border-color:var(--line2);background:var(--surface2);color:var(--txt);box-shadow:var(--shadow-s)}
+.ctrBtn:active{transform:scale(.96)}
+.ctrBtn.play{background:linear-gradient(135deg,var(--pri),#7c3aed);border:none;color:#fff;min-width:80px;box-shadow:0 4px 16px rgba(99,102,241,.35);font-weight:700}
+.ctrBtn.play:hover{box-shadow:0 6px 24px rgba(99,102,241,.5);transform:translateY(-1px)}
+.prog{flex:1;height:5px;background:var(--line);border-radius:3px;overflow:hidden;position:relative}
+.progBar{height:100%;background:linear-gradient(90deg,var(--pri),var(--pri2));border-radius:3px;transition:width .4s var(--ease)}
+.sldNum{font-size:.72rem;color:var(--mut);min-width:48px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600}
+.status{font-size:.7rem;color:var(--mut);min-width:100px;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+
+/* 모달 */
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center;backdrop-filter:blur(8px)}
+.modal.show{display:flex}
+.modalCard{background:var(--surface);border:1px solid var(--line2);border-radius:var(--r-l);padding:28px;min-width:380px;max-width:480px;box-shadow:var(--shadow-l);animation:slideUp .3s var(--ease-spring)}
+.modalCard h3{margin:0 0 20px;font-size:.95rem;font-weight:800;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+.setRow{display:flex;align-items:center;gap:8px;margin:14px 0;flex-wrap:wrap}
+.setLbl{font-size:.78rem;color:var(--mut);min-width:72px;font-weight:700}
+.setBtn{padding:7px 14px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--bg);color:var(--mut);cursor:pointer;font-size:.76rem;font-weight:600;transition:all .15s var(--ease)}
+.setBtn:hover{border-color:var(--line2);color:var(--txt2)}
+.setBtn.on{background:linear-gradient(135deg,var(--pri),#7c3aed);color:#fff;border-color:transparent;box-shadow:0 2px 10px rgba(99,102,241,.3)}
+.setBtn:disabled{opacity:.3;cursor:not-allowed}
+.modalClose{margin-top:20px;width:100%;padding:11px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--bg);color:var(--txt2);cursor:pointer;font-size:.82rem;font-weight:700;transition:all .15s var(--ease)}
+.modalClose:hover{background:var(--surface2);color:var(--txt);border-color:var(--line2)}
+
+/* 업로드 화면 */
+#uploadScreen{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;background:radial-gradient(ellipse at 50% 40%,var(--bg2) 0%,var(--bg) 80%);padding:24px;overflow-y:auto}
+.uploadStep{display:flex;align-items:center;gap:8px;margin-bottom:24px;color:var(--mut);font-size:.8rem;font-weight:600}
+.uploadStep .stepNum{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--pri-bg);color:var(--pri);font-size:.72rem;font-weight:800;border:1px solid var(--pri-bd)}
+#refZone{padding:18px 28px;border:1.5px dashed var(--line2);border-radius:var(--r-m);text-align:center;cursor:pointer;transition:all .2s var(--ease);margin-bottom:16px;width:min(480px,90vw);background:var(--surface)}
+#refZone:hover,#refZone.drag{border-color:var(--pri);background:var(--pri-bg)}
+#refZone p{color:var(--mut);margin:4px 0;font-size:.8rem}
+#refZone strong{color:var(--txt2);font-size:.88rem;font-weight:700}
+#dropZone{border:1.5px dashed var(--line2);border-radius:var(--r-l);padding:60px 48px;text-align:center;cursor:pointer;transition:all .2s var(--ease);max-width:480px;width:min(480px,90vw);background:var(--surface);position:relative;overflow:hidden}
+#dropZone::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--pri-bg),transparent 60%);opacity:0;transition:opacity .3s}
+#dropZone:hover,#dropZone.drag{border-color:var(--pri);transform:translateY(-2px);box-shadow:0 8px 32px rgba(99,102,241,.15)}
+#dropZone:hover::before,#dropZone.drag::before{opacity:1}
+#dropZone .icon{font-size:3.2rem;margin-bottom:14px;filter:drop-shadow(0 4px 12px rgba(99,102,241,.3))}
+#dropZone p{color:var(--mut);margin:6px 0;font-size:.85rem}
+#dropZone strong{color:var(--txt);font-size:1rem;font-weight:700;display:block;margin-bottom:4px}
+/* 캡션 바 — 슬라이드 하단 두 줄, 오디오 재생과 동기화 */
+.ticker{position:absolute;bottom:56px;left:24px;right:24px;min-height:44px;max-height:72px;background:rgba(8,11,18,.85);backdrop-filter:blur(12px);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;justify-content:center;gap:6px;align-items:stretch;z-index:7;padding:8px 20px;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+.ticker-text{font-size:.85rem;color:var(--pri2);font-weight:600;line-height:1.55;white-space:normal;word-break:keep-all;overflow-wrap:break-word;width:100%;text-align:center;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* [2026-09-28, 사용자 요청: "발표 중 질문 답변을 찾는 동안 캡션 바 아래에(음성 출력 없이) AI 답변
+   검색중이라고 표시 + 진행바"] 캡션 바(.ticker)와 같은 박스 안에 두 번째 줄로 표시한다 — 별도
+   박스를 새로 두면 .ticker(bottom:56px)와 .ctrlBar(bottom:0) 사이에 여유 공간이 거의 없어 겹친다.
+   검색 중엔 캡션 텍스트를 감추고 이 줄로 교체했다가, 검색이 끝나면 원래대로 돌아간다(다음 캡션은
+   renderCaption이 다시 그림). 정확한 소요 시간을 모르므로 확정 진행바가 아니라 왕복 애니메이션(이미
+   있는 shimmer 키프레임과 같은 발상)으로 "진행 중"만 보여준다 — 가짜 퍼센트로 오해를 주지 않도록.*/
+.search-indicator{display:none;flex-direction:column;gap:6px;width:100%}
+.search-indicator.show{display:flex}
+.si-text{font-size:.8rem;color:var(--warn);font-weight:600;text-align:center;display:flex;align-items:center;justify-content:center;gap:6px}
+.si-text .si-dot{width:6px;height:6px;border-radius:50%;background:var(--warn);animation:pulse 1s infinite}
+.si-bar{height:4px;background:var(--line);border-radius:2px;overflow:hidden;width:100%;position:relative}
+.si-bar-fill{position:absolute;top:0;left:0;height:100%;width:36%;border-radius:2px;background:linear-gradient(90deg,transparent,var(--pri2),transparent);animation:siSlide 1.15s ease-in-out infinite}
+@keyframes siSlide{0%{left:-40%}100%{left:104%}}
+
+/* 모바일 최적화 */
+@media (max-width:640px){
+  .sidePanel{width:100%}
+  .slideWrap.panelOpen{margin-right:0}
+  .modalCard{min-width:auto;width:calc(100vw - 32px);padding:20px;max-height:88vh;overflow-y:auto}
+  .slideContent{padding:24px 18px 96px}
+  .ctrlBar{padding:10px 10px 6px;gap:6px}
+  .ctrBtn{padding:9px 10px;font-size:.78rem}
+  .status{display:none}
+  .ticker{left:10px;right:10px;bottom:52px}
+  .iconBtn{width:40px;height:40px}
+  #dropZone{padding:40px 24px}
+}
+</style>
+</head>
+<body>
+<div class="topBar">
+  <h1><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg> AI 프레젠터</h1>
+  <button class="iconBtn" id="btnNewFile" title="새 파일" style="display:none" onclick="location.reload()">📂</button>
+  <button class="iconBtn" id="btnSettings" title="설정">⚙️</button>
+  <button class="iconBtn" id="btnPanel" title="패널" style="display:none">📋</button>
+  <!--USER_NAV-->
+</div>
+<div class="main">
+  <div id="uploadScreen">
+    <div id="startResume" style="display:none;width:min(480px,90vw);margin-bottom:22px">
+      <p style="color:var(--mut);font-size:.78rem;margin:0 0 8px;font-weight:700">📂 이전에 업로드한 발표 자료</p>
+      <div id="startPPTList"></div>
+    </div>
+    <div class="uploadStep">
+      <span class="stepNum">1</span> 참고 자료 (선택)
+      <span style="color:var(--mut2);margin:0 4px">→</span>
+      <span class="stepNum">2</span> PPT 업로드
+      <span style="color:var(--mut2);margin:0 4px">→</span>
+      <span class="stepNum">▶</span> 발표 시작
+    </div>
+    <div id="refZone">
+      <p><strong>📎 참고 자료 업로드</strong></p>
+      <p id="refStatus">MD, TXT 첨부 — 발표자가 더 풍부하게 설명하고 질문에 참조</p>
+      <input type="file" id="refInput" accept=".md,.txt,.markdown" multiple hidden />
+    </div>
+    <div id="dropZone">
+      <div class="icon">📊</div>
+      <strong>PPT 파일을 끌어다 놓거나 클릭</strong>
+      <p>.pptx · 발표 중 질문 가능 · AI 프레젠터가 음성으로 발표</p>
+      <input type="file" id="fileInput" accept=".pptx" hidden />
+    </div>
+  </div>
+  <div class="slideWrap" id="slideWrap">
+    <div class="slideContent" id="slideContent"></div>
+    <div class="ticker" id="ticker" style="display:none">
+      <span class="ticker-text" id="tickerText"></span>
+      <div class="search-indicator" id="searchIndicator">
+        <span class="si-text"><span class="si-dot"></span> AI 답변 검색중…</span>
+        <div class="si-bar"><div class="si-bar-fill"></div></div>
+      </div>
+    </div>
+    <div class="ctrlBar hidden" id="ctrlBar">
+      <button class="ctrBtn" id="btnPrev">⏮</button>
+      <button class="ctrBtn play" id="btnPlay">▶ 발표</button>
+      <button class="ctrBtn" id="btnNext">⏭</button>
+      <button class="ctrBtn" id="btnStop">⏹</button>
+      <div class="prog"><div class="progBar" id="progBar" style="width:0%"></div></div>
+      <div class="sldNum" id="sldNum">– / –</div>
+      <div class="status" id="status">대기 중</div>
+    </div>
+  </div>
+  <div class="sidePanel" id="sidePanel">
+    <div class="pHead"><span>발표 정보</span><button class="iconBtn" onclick="togglePanel()" style="width:28px;height:28px;font-size:.8rem">✕</button></div>
+    <div class="qaBox" id="qaBox"></div>
+    <div class="slideList" id="slideList"></div>
+  </div>
+</div>
+<div class="modal" id="settingsModal">
+  <div class="modalCard">
+    <h3>⚙️ 설정</h3>
+    <!-- ponytail: 현재 미사용 — 엔진은 항상 OpenAI 고정, 필요해지면 style 제거 -->
+    <div class="setRow" style="display:none"><span class="setLbl">스크립트</span>
+      <button class="setBtn on" id="setScrOpenAI" onclick="setScriptEngine('openai')">☁️ OpenAI</button>
+      <button class="setBtn" id="setScrLocal" onclick="setScriptEngine('local')">🧠 로컬</button></div>
+    <div class="setRow"><span class="setLbl">TTS 엔진</span>
+      <button class="setBtn on" id="ttsOpenAI" onclick="setTtsEngine('openai')">☁️ OpenAI</button>
+      <button class="setBtn" id="ttsLocal" onclick="setTtsEngine('local')">🧠 로컬(무료)</button></div>
+    <div class="setRow" id="voiceRowOpenAI" style="flex-wrap:wrap"><span class="setLbl">발표자 목소리</span>
+      <button class="setBtn" id="vAlloy" onclick="setVoice('alloy')" title="중성적, 차분함">Alloy</button>
+      <button class="setBtn" id="vEcho" onclick="setVoice('echo')" title="남성, 부드러움">Echo</button>
+      <button class="setBtn" id="vFable" onclick="setVoice('fable')" title="남성, 영국식 억양">Fable</button>
+      <button class="setBtn" id="vOnyx" onclick="setVoice('onyx')" title="남성, 깊은 저음">Onyx</button>
+      <button class="setBtn on" id="vNova" onclick="setVoice('nova')" title="여성, 밝고 또렷함">Nova</button>
+      <button class="setBtn" id="vShimmer" onclick="setVoice('shimmer')" title="여성, 부드럽고 따뜻함">Shimmer</button></div>
+    <div class="setRow" id="voiceRowLocal" style="display:none"><span class="setLbl">로컬 보이스</span>
+      <button class="setBtn on" id="vEric" onclick="setVoice('eric')">Eric</button>
+      <button class="setBtn" id="vDylan" onclick="setVoice('dylan')">Dylan</button>
+      <button class="setBtn" id="vSohee" onclick="setVoice('sohee')">Sohee(여)</button></div>
+    <div class="setRow"><span class="setLbl">🗣️ 발표 속도</span>
+      <input type="range" id="speedSlider" min="0.8" max="2" step="0.05" oninput="setTtsSpeed(this.value)" style="flex:1;accent-color:var(--pri)"/>
+      <span id="speedVal" style="min-width:44px;text-align:right;font-size:.78rem;color:var(--txt2);font-weight:700"></span></div>
+    <div class="setRow" style="justify-content:flex-end;padding-top:0"><span id="speedTotalTime" style="font-size:.72rem;color:var(--mut)"></span></div>
+    <div class="setRow" style="flex-direction:column;align-items:flex-start;gap:6px">
+      <span class="setLbl">📊 저장된 PPT</span>
+      <div id="pptList" style="width:100%;max-height:140px;overflow-y:auto;font-size:.78rem"></div>
+    </div>
+    <div class="setRow" style="flex-direction:column;align-items:flex-start;gap:6px">
+      <span class="setLbl">📎 참고 자료(RAG) 관리</span>
+      <div class="setRow" style="margin:0"><span class="setLbl" style="min-width:auto">사용 여부</span>
+        <button class="setBtn on" id="ragOn" onclick="setRagEnabled(true)">✅ 켜짐</button>
+        <button class="setBtn" id="ragOff" onclick="setRagEnabled(false)">⛔ 꺼짐</button></div>
+      <div id="refDocList" style="width:100%;max-height:140px;overflow-y:auto;font-size:.78rem;color:var(--mut)">
+        <p style="margin:4px 0;color:var(--mut)">없음 — 업로드 화면이나 아래 버튼으로 추가</p>
+      </div>
+      <button class="setBtn" onclick="document.getElementById('refInput2').click()">+ 문서 추가</button>
+      <input type="file" id="refInput2" accept=".md,.txt,.markdown" multiple hidden />
+    </div>
+    <button class="modalClose" onclick="closeSettings()">닫기</button>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script>
+'use strict';
+// [2026-10-02] 비밀 키를 URL/페이지 JS에 직접 들고 있지 않도록, 로그인 서버(/ppt-agent/api/*)가
+// 세션 쿠키만 확인하고 실제 n8n 호출에 키를 대신 붙여주는 프록시로 호출 — 여기선 키를 아예 모른다.
+const LOCAL_LLM='/ppt-agent/api/llm';
+const OPENAI_SCRIPT='/ppt-agent/api/script';
+const TTS_URL='https://bc.wizbase.ai.kr/tts-api/v1/audio/speech';
+let scriptEngine='openai',ttsVoice='nova',ttsEngine='openai',ragEnabled=true;
+let ttsSpeed=(()=>{try{const s=parseFloat(localStorage.getItem('ppt_agent_speed'));return s>=0.8&&s<=2?s:1.38}catch(e){return 1.38}})();
+function setTtsSpeed(v){ttsSpeed=+v;document.getElementById('speedVal').textContent=ttsSpeed.toFixed(2)+'x';try{localStorage.setItem('ppt_agent_speed',ttsSpeed)}catch(e){}updateSpeedTotalTime()}
+// [2026-09-29] 발표 속도 슬라이더 옆에 예상 총 발표 시간 표시 — 슬라이드별 실제 스크립트가
+// 아직 생성 전이면(LLM 호출 전) note/bullets/title로 대체 추정(ponytail: 정확한 산출 아님,
+// 실제 스크립트가 생성되면 그 길이로 자동 갱신됨 — 슬라이드 진행 중 openSettings 재호출 시 반영).
+const SPEECH_CHARS_PER_SEC=5.5;
+function estimateTotalSeconds(){
+  let total=0;
+  for(const s of slides){
+    const text=(s.script||s.note||(s.bullets||[]).join('. ')||s.title||'').replace(/https?:\/\/[^\s<>"']+/g,'');
+    if(!text)continue;
+    const sentCount=splitSentences(text).length||1;
+    total+=text.length/(SPEECH_CHARS_PER_SEC*ttsSpeed)+(sentCount-1)*0.7+1.5;  // 문장 간 쉼 + 슬라이드 전환 정지
+  }
+  return total;
+}
+function updateSpeedTotalTime(){
+  const el=document.getElementById('speedTotalTime');
+  if(!el)return;
+  if(!slides.length){el.textContent='';return}
+  const sec=Math.round(estimateTotalSeconds());
+  el.textContent='⏱️ 예상 총 발표 시간: 약 '+Math.floor(sec/60)+'분 '+String(sec%60).padStart(2,'0')+'초';
+}
+const STYLE='Energetic Korean broadcast announcer. Bright, upbeat, confident. Higher pitch. Crisp articulation. Dynamic delivery like a morning news host.';
+let slides=[],curSlideIdx=-1,sentences=[],curSentenceIdx=0;
+let playing=false,interrupted=false,audioEl=null,recognizer=null,sttActive=false,ttsSpeaking=false,panelOpen=false;let qaState='idle';
+// [2026-09-29] 브라우저 내장 TTS(speakFB) 폴백이 voice 미지정으로 매번 OS 기본 음성에 맡겨져서,
+// 음성팩 로딩 타이밍/업데이트에 따라 "갑자기 다른(이상한) 목소리"로 튀는 문제 재발 방지 —
+// 최초 1회 한국어 음성을 찾아 고정하고, 이후 폴백은 항상 같은 음성을 씀.
+let _koVoice=null;
+function pickKoreanVoice(){
+  if(typeof speechSynthesis==='undefined')return null;
+  const voices=speechSynthesis.getVoices();
+  if(!voices.length)return null;
+  const v=voices.find(v=>v.lang==='ko-KR')||voices.find(v=>v.lang&&v.lang.startsWith('ko'))||null;
+  if(v)console.log('브라우저 TTS 폴백 음성 고정:',v.name,v.lang);
+  else console.warn('한국어 음성을 찾지 못함 — 브라우저 기본값 사용(품질 보장 안 됨)');
+  return v;
+}
+if(typeof speechSynthesis!=='undefined'){
+  _koVoice=pickKoreanVoice();
+  speechSynthesis.onvoiceschanged=()=>{_koVoice=pickKoreanVoice()};
+}
+// ── 청중 대화 지속 감지 — 배경 소음이 아닌 실제 대화가 이어지면 잠시 멈추고 확인 ──
+let _bgTalkTimes=[];
+const BG_TALK_WINDOW_MS=10000,BG_TALK_THRESHOLD=3;  // 10초 내 3회 감지되면 대화 지속으로 판단
+let _continueSilenceTimer=null;
+const CONTINUE_SILENCE_MS=6000;  // 6초간 조용해지면 자동 재개
+const RESUME_RE=/계속\s*(발표|진행|해|하세요|해주세요)|발표\s*(계속|이어)|이어서\s*(해|진행|주세요)|다시\s*시작/;
+// [2026-09-29] "계속 발표할까요?"에 대한 가장 흔한 대답("네"/"넵"/"알겠습니다"/"좋아요")은 RESUME_RE의
+// 동사형 구문과 안 맞아 무시되던 문제 — Q&A 확인(confirming 상태)에 이미 쓰던 긍정 판별을 공유.
+const POSITIVE_RE=/네|예|넵|넹|좋아|맞아|응|계속|진행|없|괜찮|고마워|감사|충분|알겠|오케이|ok/i;
+// ── 슬라이드-음성 동기화 자가 점검 ──
+// renderSlide가 실제로 그린 슬라이드 인덱스와 playSentenceStream이 발화 중인 curSlideIdx가
+// 어긋나면 AI가 스스로 인지하고 "죄송합니다, 해당 페이지로 갈게요" 멘트 후 화면을 복구.
+let _visualSlideIdx=-1;
+const SYNC_CORRECTIONS=[
+  '아, 죄송합니다. 화면이 다른 페이지로 넘어가 있네요. 바로 이동하겠습니다.',
+  '앗, 지금 설명하는 페이지가 아니네요. 죄송합니다. 해당 페이지로 갈게요.',
+  '화면이 어긋났네요. 죄송합니다. 바로잡고 이어서 설명드리겠습니다.',
+];
+let _syncCorrIdx=0;
+// 목소리 통일 — 모든 발화를 OpenAI TTS(nova)로, 프리페치 캐시로 침묵 최소화
+let promptCache={};
+const CACHED_PHRASES=['네, 질문해 주세요.','다른 질문 없으시면 계속 발표해도 될까요?','네, 말씀해 주세요.','좋은 질문입니다.','잠시 확인해 보겠습니다.','질문이 없으시면 계속 진행하겠습니다.','더 질문 있으신가요?'];
+async function pregenPhrases(){
+  console.log('프리페치: 공통 문구',CACHED_PHRASES.length,'개 TTS 생성 중…');
+  for(const p of CACHED_PHRASES){
+    if(!promptCache[p]){
+      const u=await ttsSentence(p);
+      if(u)promptCache[p]=u;
+    }
+  }
+  console.log('프리페치 완료:',Object.keys(promptCache).length,'개');
+}
+async function speakUnified(text){
+  if(!text)return;
+  noteSpoken(text);  // 에코 방지용 기록
+  let u=promptCache[text];
+  if(u)return playAudio(u);
+  u=await ttsSentence(text);
+  if(u){promptCache[text]=u;return playAudio(u)}
+  return speakFB(text);
+}
+// ── RAG/PPT 저장소 — 예전엔 브라우저 IndexedDB(유저 구분 없음)였는데, 이제 로그인 서버가
+// 유저별로 분리해서 SQLite에 들고 있고 임베딩/검색도 서버가 처리한다(비밀 키도 서버만 앎).
+// 클라이언트는 /ppt-agent/api/* 호출만 하면 됨 — 청크/임베딩을 직접 들고 있을 필요가 없어졌다.
+async function apiJson(url,opts){
+  const r=await fetch(url,opts);
+  if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||('HTTP '+r.status))}
+  return r.json();
+}
+let refDocs=[];  // [{id,name,chunkCount,isPrimary,sourceBytes,createdAt}] — 서버가 주는 메타데이터만 들고 있음
+async function loadDocsFromServer(){
+  try{refDocs=await apiJson('/ppt-agent/api/docs')}catch(e){console.warn('문서 목록 로드 실패:',e);refDocs=[]}
+  updateRefDocList();
+}
+// [2026-09-28, 사용자 요청: "참고 파일이 여러개일 때 PPT장표가 주로 참고할 RAG파일을 지정... 검색
+// 속도를 높이는 것"] — "주로 참고" 표시된 문서가 있으면 그걸로만 검색 범위를 좁히는 규칙은 서버
+// /api/search 쪽으로 그대로 옮겨감(doc.isPrimary 플래그 기준).
+async function searchRef(q,k=3){
+  try{return await apiJson('/ppt-agent/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,k})})}
+  catch(e){return[]}
+}
+async function loadRefDocs(files){
+  for(const f of files){
+    const text=await f.text();
+    document.getElementById('refStatus').textContent='⏳ "'+f.name+'" 업로드/임베딩 중…';
+    try{
+      const doc=await apiJson('/ppt-agent/api/docs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:f.name,text})});
+      refDocs.push(doc);
+    }catch(e){console.warn('문서 업로드 실패:',e)}
+  }
+  document.getElementById('refStatus').textContent='✅ '+refDocs.length+'개 파일, '+refDocs.reduce((s,d)=>s+d.chunkCount,0)+'개 청크';
+  updateRefDocList();
+}
+// 설정 모달에서 문서 목록 갱신 + 내용 보기
+function updateRefDocList(){
+  const el=document.getElementById('refDocList');
+  if(!refDocs.length){el.innerHTML='<p style="margin:4px 0;color:var(--mut)">없음 — 업로드 화면이나 "+ 문서 추가"로 첨부</p>';return}
+  const anyPrimary=refDocs.some(d=>d.isPrimary);
+  el.innerHTML=(anyPrimary?'<p style="margin:2px 0 8px;color:var(--ok);font-size:.7rem">⭐ 표시된 문서만 검색에 사용됩니다(속도·정확도 향상)</p>':'<p style="margin:2px 0 8px;color:var(--mut);font-size:.7rem">여러 개 첨부 시 ⭐로 주로 참고할 문서를 지정할 수 있습니다(미지정 시 전체 검색)</p>')+
+  refDocs.map((d,i)=>{
+    return '<div style="padding:6px 0;border-bottom:1px solid rgba(30,42,68,.3)'+(d.isPrimary?';background:rgba(52,211,153,.06)':'')+'">'+
+      '<div style="display:flex;align-items:center;gap:6px">'+
+        '<button class="iconBtn" style="width:22px;height:22px;font-size:.72rem;color:'+(d.isPrimary?'var(--ok)':'var(--mut2)')+'" title="'+(d.isPrimary?'주로 참고 해제':'PPT가 주로 참고할 문서로 지정')+'" onclick="toggleDocPrimary('+i+')">'+(d.isPrimary?'⭐':'☆')+'</button>'+
+        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem;color:var(--txt)">'+esc(d.name)+'</span>'+
+        '<span style="color:var(--ok);font-size:.68rem">'+d.chunkCount+'청크</span>'+
+        '<button class="setBtn" style="padding:2px 8px;font-size:.68rem" onclick="toggleDocView('+i+')">보기</button>'+
+        '<button class="iconBtn" style="width:20px;height:20px;font-size:.6rem" onclick="removeRefDoc('+i+')">✕</button>'+
+      '</div>'+
+      '<div id="docView'+i+'" style="display:none;margin-top:6px;padding:8px;background:var(--bg);border-radius:8px;max-height:120px;overflow-y:auto;font-size:.72rem;color:var(--mut);line-height:1.5"></div>'+
+      '</div>';
+  }).join('');
+}
+// 청크 내용은 이제 클라이언트가 안 들고 있으니(서버에만 있음) "보기" 누를 때 그때 가져와서 캐시.
+async function toggleDocView(i){
+  const el=document.getElementById('docView'+i);
+  if(!el)return;
+  if(el.style.display==='block'){el.style.display='none';return}
+  if(!el.dataset.loaded){
+    try{
+      const chunks=await apiJson('/ppt-agent/api/docs/'+refDocs[i].id+'/chunks');
+      el.innerHTML=chunks.map(c=>'<div style="margin-bottom:4px;padding:4px;border-left:2px solid var(--pri);padding-left:8px">'+esc(c.text.slice(0,150))+(c.text.length>150?'…':'')+'</div>').join('')||'<div>내용 없음</div>';
+      el.dataset.loaded='1';
+    }catch(e){el.innerHTML='<div>불러오기 실패</div>'}
+  }
+  el.style.display='block';
+}
+async function removeRefDoc(idx){
+  const doc=refDocs[idx];if(!doc)return;
+  try{await apiJson('/ppt-agent/api/docs/'+doc.id,{method:'DELETE'})}catch(e){console.warn('문서 삭제 실패:',e)}
+  refDocs=refDocs.filter((_,i)=>i!==idx);
+  updateRefDocList();
+  document.getElementById('refStatus').textContent='✅ '+refDocs.length+'개 파일';
+}
+// [2026-09-28, 사용자 요청] "주로 참고" 지정 토글 — 여러 개 동시 지정 가능(예: 발표 관련 자료 2개를
+// 둘 다 주력으로). 하나도 지정 안 하면 §searchRef가 전체 문서에서 검색하는 기존 동작으로 자동 복귀.
+async function toggleDocPrimary(idx){
+  const doc=refDocs[idx];if(!doc)return;
+  doc.isPrimary=!doc.isPrimary;
+  try{await apiJson('/ppt-agent/api/docs/'+doc.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({isPrimary:doc.isPrimary})})}
+  catch(e){console.warn('primary 저장 실패:',e);doc.isPrimary=!doc.isPrimary}
+  updateRefDocList();
+}
+// [2026-10-02] "+ 문서 추가"(refInput2)가 loadRefDocs와 토씨 하나까지 똑같은 청킹 로직을 복붙해서
+// 들고 있던 것 — 이제 둘 다 서버의 /api/docs 하나로 통일됐으니 그냥 같은 함수를 부르면 된다.
+document.getElementById('refInput2').addEventListener('change',e=>{
+  if(e.target.files.length)loadRefDocs([...e.target.files]);
+  e.target.value='';
+});
+// [2026-10-02] PPT를 서버 JSON 컬럼에 저장하므로 슬라이드 이미지(Blob)를 base64로 왕복해야 함 —
+// IndexedDB 구조적 복제에선 Blob을 그냥 넣으면 됐지만 JSON 경계를 넘길 땐 그게 안 된다.
+async function bytesToBase64(bytes){
+  let binary='';const chunk=0x8000;
+  for(let i=0;i<bytes.length;i+=chunk)binary+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));
+  return btoa(binary);
+}
+function base64ToBlob(b64,type){
+  const binary=atob(b64);const bytes=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+  return new Blob([bytes],{type:type||'image/png'});
+}
+async function slidesToJsonSafe(sl){
+  return Promise.all(sl.map(async s=>({
+    title:s.title,bullets:s.bullets,note:s.note,script:s.script||'',slideSize:s.slideSize,
+    shapes:await Promise.all((s.shapes||[]).map(async sh=>{
+      if(sh.type!=='image')return sh;
+      if(!sh.blob)return{type:'image',box:sh.box,b64:null,mime:null};
+      const buf=await sh.blob.arrayBuffer();
+      return{type:'image',box:sh.box,b64:await bytesToBase64(new Uint8Array(buf)),mime:sh.blob.type||'image/png'};
+    }))
+  })));
+}
+function slidesFromJsonSafe(sl){
+  return sl.map(s=>({...s,script:s.script||'',shapes:(s.shapes||[]).map(sh=>{
+    if(sh.type!=='image')return sh;
+    if(!sh.b64)return{...sh,src:null,blob:null};
+    const blob=base64ToBlob(sh.b64,sh.mime);
+    return{type:'image',box:sh.box,blob,src:URL.createObjectURL(blob)};
+  })}));
+}
+// 시작화면 — 이전에 저장된 PPT가 있으면(+ 매칭되는 참고자료 있으면 함께 표시) 목록과 발표 버튼 노출
+async function renderStartResume(){
+  try{
+    const ppts=await apiJson('/ppt-agent/api/ppts');
+    const wrap=document.getElementById('startResume');
+    const list=document.getElementById('startPPTList');
+    if(!ppts.length){wrap.style.display='none';return}
+    const ragNote=refDocs.length?(' · 📎 참고 자료 '+refDocs.length+'개 연결됨'):'';
+    list.innerHTML=ppts.map(p=>
+      '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin-bottom:8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-m)">'+
+      '<div style="flex:1;overflow:hidden">'+
+        '<div style="color:var(--txt);font-size:.85rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(p.name)+'</div>'+
+        '<div style="color:var(--mut);font-size:.7rem;margin-top:2px">'+fmtDate(p.createdAt)+' · '+fmtBytes(p.size)+' · '+p.slideCount+'슬라이드'+ragNote+'</div>'+
+      '</div>'+
+      '<button class="ctrBtn play" style="min-width:auto;padding:9px 16px" onclick="loadSavedPPT('+p.id+')">▶ 발표</button>'+
+      '</div>'
+    ).join('');
+    wrap.style.display='block';
+  }catch(e){console.warn('시작화면 PPT 목록 로드 실패:',e)}
+}
+loadDocsFromServer().then(renderStartResume).catch(()=>renderStartResume());
+// 저장된 PPT 목록 표시
+async function updatePPTList(){
+  const el=document.getElementById('pptList');
+  if(!el)return;
+  try{
+    const ppts=await apiJson('/ppt-agent/api/ppts');
+    if(!ppts.length){el.innerHTML='<p style="margin:4px 0;color:var(--mut)">없음</p>';return}
+    el.innerHTML=ppts.map(p=>
+      '<div style="padding:6px 0;border-bottom:1px solid rgba(30,42,68,.3)">'+
+      '<div style="display:flex;align-items:center;gap:6px">'+
+      '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--txt);font-size:.8rem">'+esc(p.name)+'</span>'+
+      '<button class="setBtn" style="padding:3px 10px;font-size:.7rem;background:linear-gradient(135deg,var(--pri),#7c3aed);color:#fff;border:none" onclick="loadSavedPPT('+p.id+')">▶ 발표</button>'+
+      '<button class="iconBtn" style="width:20px;height:20px;font-size:.6rem" onclick="deleteSavedPPT('+p.id+')">✕</button></div>'+
+      '<div style="color:var(--mut);font-size:.66rem;margin-top:2px">'+fmtDate(p.createdAt)+' · '+fmtBytes(p.size)+' · '+p.slideCount+'슬라이드</div>'+
+      '</div>'
+    ).join('');
+  }catch(e){el.innerHTML='<p style="color:var(--mut)">로드 실패</p>'}
+}
+async function loadSavedPPT(id){
+  try{
+    const ppt=await apiJson('/ppt-agent/api/ppts/'+id);
+    slides=slidesFromJsonSafe(ppt.slides);
+    const list=document.getElementById('slideList');
+    list.innerHTML='';
+    slides.forEach((s,i)=>{
+      const d=document.createElement('div');d.className='sldItem';
+      d.innerHTML='<span class="num">'+(i+1)+'</span><span>'+esc(s.title||'무제')+'</span>';
+      d.onclick=()=>{if(!playing){curSlideIdx=i;renderSlideWhenReady(i)}};list.appendChild(d);
+    });
+    renderSlide(0);curSlideIdx=0;
+    document.getElementById('uploadScreen').style.display='none';
+    document.getElementById('ctrlBar').classList.remove('hidden');
+    document.getElementById('btnNewFile').style.display='flex';
+    closeSettings();
+    setStatus(slides.length+'개 슬라이드 로드 — 발표 시작');
+    startPresentation();
+  }catch(e){console.error('PPT load fail:',e)}
+}
+async function deleteSavedPPT(id){
+  try{await apiJson('/ppt-agent/api/ppts/'+id,{method:'DELETE'})}catch(e){}
+  updatePPTList();
+  renderStartResume();
+}
+// 설정 모달 열 때 PPT 목록 갱신
+
+
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function fmtBytes(n){if(!n)return'-';const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return n.toFixed(i?1:0)+u[i]}
+function fmtDate(ts){if(!ts)return'-';const d=new Date(ts);const p=x=>String(x).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())}
+function setStatus(m){document.getElementById('status').textContent=m}
+const HANJA=/[一-鿿]/;
+const isHall=t=>/mbc|sbs|kbs\d?|jtbc|ytn|뉴스\s*(입니다|였습니다)|구독과\s*좋아요/i.test(t);
+// [사용자 요청] TV·생활소음·타인 속삭임에는 반응하지 않고 계속 발표 — 확실한 의사 표현("질문있습니다",
+// "잠깐 중지", "물어봐도 될까요" 등)에서만 중단. 불필요한 인터럽트로 발표 흐름이 끊기는 것을 방지.
+const INTENT_RE=/질문|잠깐|중지|멈춰|멈출|정지|잠시만|물어봐|여쭤|죄송한데|실례|궁금한데|확인해|다시\s*설명|더\s*자세히|무슨\s*뜻|설명\s*해\s*줘|stop|question|excuse\s*me|wait\s*a/i;
+
+// ── 고도화 인텐트 감지 — 발화 유형별 4종 분류 ──
+// pause: 일시정지 요청 → "질문 있으신가요?" / ask: 질문 허락 → "네, 질문해 주세요"
+// question: 직접 질문 (질문어/의문형 종결) → 즉시 답변 / intent: 기타 키워드
+function detectIntent(text){
+  if(!text||text.length<3)return'none';
+  if(isHall(text))return'none';
+  // 1. 일시정지 — "잠깐만요", "잠시만요", "멈춰주세요", "stop"
+  if(/^(잠깐|잠시|멈춰|멈출|중지|정지|그만|스톱|stop|wait|hold)/i.test(text)&&text.length<20)return'pause';
+  // 2. 질문 허락/예고 — "질문 있습니다", "질문해도 될까요?", "궁금한게 있어서요"
+  if(/(질문해도|물어봐도|여쭤봐도|질문 있|질문할게|질문드릴|질문 좀|궁금한게 있|궁금한 것이|질문이 있)/.test(text)&&text.length<30)return'ask';
+  // 3. 직접 질문 — 의문 부호, 의문형 종결어미, 질문어 포함
+  if(/[?？]/.test(text))return'question';
+  if(/(까요|나요|지요|죠|가요|인가요|을까요|ㄹ까요|습니까|ㅂ니까|니까|ㄴ가요)$/m.test(text.trim()))return'question';
+  // [2026-09-29] "설명 좀 더 해주세요"처럼 요청어와 동사 사이에 다른 말이 끼면(원래 붙어 있어야
+  // 매칭되는 "설명해"/"가르쳐줘" 패턴이라) 질문으로 인식 못 하고 그냥 넘어가던 문제 — 6자 이내 간격 허용.
+  if(/어떻게|왜\s|무엇을|뭐(에요|야|예요|죠)|누가\s|언제\s|어디(에요|서|세요)|어느\s|몇\s|얼마(나|에|예요)|무슨\s|어떤\s|궁금(해|한|하)|알고\s싶|알려(줘|주세요)|설명.{0,6}(해|줘)|가르쳐.{0,6}(줘|주세요)|이해가\s안/.test(text))return'question';
+  // 4. 기존 키워드 기반 인텐트
+  if(INTENT_RE.test(text))return'intent';
+  return'none';
+}
+function isIntent(text){return detectIntent(text)!=='none'}
+
+// [2026-10-01] 텍스트와 이미지가 분리돼 보이는 문제 — 기존엔 텍스트를 전부 모아 <h2>+<ul>로,
+// 이미지는 전부 모아 그 뒤에 쌓았음(원본 슬라이드의 실제 배치 무시, "통 이미지" 슬라이드만 우연히
+// 맞게 보였음). 각 도형의 xfrm(off/ext) 위치를 읽어 원본 배치 그대로 겹쳐 그리도록 변경.
+async function getSlideSize(z){
+  try{
+    const x=await z.file('ppt/presentation.xml').async('text');
+    const d=new DOMParser().parseFromString(x,'application/xml');
+    const sz=d.getElementsByTagNameNS('http://schemas.openxmlformats.org/presentationml/2006/main','sldSz')[0];
+    if(sz)return{w:+sz.getAttribute('cx'),h:+sz.getAttribute('cy')};
+  }catch(e){}
+  return{w:12192000,h:6858000};  // 16:9 기본값
+}
+function readBox(node,nsA){
+  const xfrm=node.getElementsByTagNameNS(nsA,'xfrm')[0];
+  const off=xfrm&&xfrm.getElementsByTagNameNS(nsA,'off')[0];
+  const ext=xfrm&&xfrm.getElementsByTagNameNS(nsA,'ext')[0];
+  if(!off||!ext)return null;  // 레이아웃에서 위치를 상속받는 placeholder(슬라이드에 xfrm 없음) — 폴백 렌더링으로 처리
+  return{x:+off.getAttribute('x'),y:+off.getAttribute('y'),w:+ext.getAttribute('cx'),h:+ext.getAttribute('cy')};
+}
+function parseSlideXML(x){
+  const d=new DOMParser().parseFromString(x,'application/xml');
+  const nsA='http://schemas.openxmlformats.org/drawingml/2006/main';
+  const nsP='http://schemas.openxmlformats.org/presentationml/2006/main';
+  const nsR='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const tree=d.getElementsByTagNameNS(nsP,'spTree')[0];
+  const shapes=[];let title='';const bullets=[];
+  if(tree){
+    for(const node of tree.children){
+      if(node.localName!=='sp')continue;
+      const ts=[...node.getElementsByTagNameNS(nsA,'t')].map(t=>t.textContent.trim()).filter(Boolean);
+      if(!ts.length)continue;
+      const text=ts.join(' ');
+      const ph=node.getElementsByTagNameNS(nsP,'ph')[0];
+      const isTitle=!!(ph&&/title/i.test(ph.getAttribute('type')||''));
+      if(isTitle&&!title)title=text;else bullets.push(text);
+      shapes.push({type:isTitle?'title':'text',text,box:readBox(node,nsA)});
+    }
+    // [2026-10-01] "Flattened" 류 변환 도구가 만든 PPT에서 그림이 최상위 바로 아래 <p:pic>이 아니라
+    // 그룹(<p:grpSp>)이나 호환성 래퍼(<mc:AlternateContent>) 안에 중첩돼 있어, 최상위 자식만 보던
+    // 기존 방식으로는 못 찾고 화면이 통째로 비어 보이는 경우가 있었다. 트리 전체에서 <p:pic>을
+    // 깊이 상관없이 찾도록 변경 — 같은 rId가 중복으로 잡히는 것만(Choice/Fallback 중복 등) 걸러낸다.
+    const seenRid=new Set();
+    for(const node of tree.getElementsByTagNameNS(nsP,'pic')){
+      const blip=node.getElementsByTagNameNS(nsA,'blip')[0];
+      const rId=blip&&blip.getAttributeNS(nsR,'embed');
+      if(rId&&seenRid.has(rId))continue;
+      if(rId)seenRid.add(rId);
+      shapes.push({type:'image',_rId:rId,src:null,blob:null,box:readBox(node,nsA)});
+    }
+  }
+  if(!shapes.length){
+    const ts=[...d.getElementsByTagNameNS(nsA,'t')].map(t=>t.textContent.trim());
+    title=ts[0]||'';bullets.push(...ts.slice(1).filter(t=>t&&t!==title).slice(0,20));
+  }else if(!title){
+    // <p:ph type="title">가 없는 슬라이드(순수 텍스트박스로만 구성)도 사이드바/스크립트용
+    // 제목은 있어야 하므로 첫 텍스트 도형을 메타데이터상 제목으로 삼음. 단, 이건 title/bullets
+    // 분류용일 뿐 — 실제 렌더링은 위에서 정한 shape.type(text) 그대로라 화면엔 영향 없음.
+    const first=shapes.find(sh=>sh.type==='text');
+    if(first){title=first.text;const bi=bullets.indexOf(first.text);if(bi>=0)bullets.splice(bi,1)}
+  }
+  return{title,bullets:bullets.slice(0,20),shapes,note:''};
+}
+// 슬라이드 하나의 이미지(rels + media 바이너리)만 해석 — 전체 덱을 한 번에 안 긁어오고
+// 필요한 슬라이드부터 순서대로 채워서, 뒤 슬라이드 이미지 때문에 1번 슬라이드 음성 시작이
+// 늦어지지 않게 한다(아래 parsePPTX 참고).
+// rels 파일 안의 상대 경로(예: "../media/image1.png")를 zip 안의 실제 경로로 변환.
+// 예전엔 "../"를 한 번만 떼어내는 식이었는데, 변환 도구에 따라 "../../"처럼 더 깊거나 "../" 없이
+// 루트 기준으로 쓰는 경우까지 커버하려고 일반적인 상대경로 계산으로 바꿈.
+function resolvePartPath(basePath,target){
+  if(target.startsWith('/'))return target.slice(1);
+  const parts=(basePath+'/'+target).split('/');
+  const out=[];
+  for(const p of parts){
+    if(p==='..')out.pop();else if(p!=='.'&&p!=='')out.push(p);
+  }
+  return out.join('/');
+}
+async function resolveSlideImages(z,sl,relsPath){
+  const rf=z.file(relsPath);
+  if(!rf){console.warn('rels 파일을 찾을 수 없음(이미지 연결 정보 없음):',relsPath);return}
+  const mediaFound=[];
+  const relsText=await rf.async('text');
+  const relCount=(relsText.match(/<Relationship\b/g)||[]).length;
+  // rels의 상대 경로는 "_rels 폴더"가 아니라 "그 rels가 설명하는 원본 파트(slideN.xml)가 있는
+  // 폴더" 기준으로 풀어야 함(OPC 스펙) — 즉 ".../_rels/slideN.xml.rels" → ".../"(_rels 한 칸 위).
+  const basePath=relsPath.replace(/\/_rels\/[^/]+$/,'');
+  for(const m of relsText.matchAll(/<Relationship\b[^>]*>/g)){
+    const idM=m[0].match(/Id="([^"]+)"/);
+    // [2026-10-01] 예전엔 Target 경로에 "media/"라는 폴더명이 그대로 들어있어야만 매칭했는데,
+    // 변환 도구에 따라 폴더명이 다를 수 있어 확장자 기준으로 넓힘 — 실제로 이미지 파일이기만 하면 됨.
+    const tgtM=m[0].match(/Target="([^"]+\.(?:png|jpe?g|gif|bmp|emf|wmf|tiff?|svg)[^"]*)"/i);
+    if(!idM||!tgtM)continue;
+    const path=resolvePartPath(basePath,tgtM[1]);
+    const f=z.file(path);
+    if(!f){console.warn('rels엔 있지만 zip 안에 실제 파일 없음:',path);continue}
+    const blob=await f.async('blob');const url=URL.createObjectURL(blob);
+    mediaFound.push({url,blob});
+    for(const sh of sl.shapes)if(sh.type==='image'&&sh._rId===idM[1]){sh.src=url;sh.blob=blob}
+  }
+  if(!mediaFound.length&&relCount>0){
+    console.warn(`rels에 관계 ${relCount}개가 있지만 이미지로 인식된 건 0개(외부 링크 이미지이거나 지원 안 하는 확장자일 수 있음):`,relsPath);
+  }
+  // [2026-10-01] 안전망 — 슬라이드 배경 그림(<p:bg>), 호환성 래퍼(AlternateContent)로 감싼 그림,
+  // rId 연결이 안 맞는 경우처럼 구조 파싱/상관관계로 끝내 이미지를 못 찾았는데 rels엔 이미지가
+  // 분명히 있으면 — "통 이미지" 슬라이드로 간주해 꽉 채워 보여준다. 위치가 100% 정확하지 않을 수
+  // 있어도 슬라이드가 통째로 안 보이는 것보단 훨씬 낫다.
+  if(mediaFound.length&&!sl.shapes.some(sh=>sh.type==='image'&&sh.src)){
+    const existing=sl.shapes.find(sh=>sh.type==='image');
+    if(existing){
+      console.warn('이미지 도형은 찾았지만 rId 연결 실패 — 첫 media로 대체:',relsPath);
+      existing.src=mediaFound[0].url;existing.blob=mediaFound[0].blob;
+    }else{
+      console.warn('슬라이드 구조 파싱으로 도형을 못 찾아 안전망 적용(통 이미지로 간주):',relsPath);
+      sl.shapes.push({type:'image',box:{x:0,y:0,w:sl.slideSize.w,h:sl.slideSize.h},src:mediaFound[0].url,blob:mediaFound[0].blob});
+    }
+  }
+}
+async function parsePPTX(file){
+  const z=await JSZip.loadAsync(file);
+  const slideSize=await getSlideSize(z);
+  const fs=Object.keys(z.files).filter(n=>n.match(/^ppt\/slides\/slide\d+\.xml$/)).sort((a,b)=>+a.match(/\d+/)[0]-+b.match(/\d+/)[0]);
+  const r=[];
+  // 1단계: 텍스트/위치/노트만 빠르게 전부 파싱(이미지 바이너리 압축 해제 없음) — 대용량 PPT라도 빠름.
+  for(let i=0;i<fs.length;i++){
+    const x=await z.file(fs[i]).async('text');
+    const sl=parseSlideXML(x);
+    sl.slideSize=slideSize;
+    // [2026-10-01] "슬라이드 전체를 그림 1장으로 통짜 변환"한 덱에서 오른쪽(또는 아래)에 여백이
+    // 생기는 문제 — 변환 도구가 그림을 삽입할 때 xfrm 크기가 슬라이드 크기와 딱 안 맞고 살짝
+    // 작게(반올림 등으로) 들어간 경우, 그 그림 하나가 사실상 슬라이드 전체라는 의도는 명백하므로
+    // 거의 꽉 차 있으면(90%+) 슬라이드 전체 크기로 스냅. 진짜로 슬라이드 한구석에 작게 넣은
+    // 로고 등은 90% 미만이라 이 보정에 안 걸림.
+    if(sl.shapes.length===1&&sl.shapes[0].type==='image'){
+      const b=sl.shapes[0].box;
+      if(b&&b.w>=slideSize.w*0.9&&b.h>=slideSize.h*0.85){
+        sl.shapes[0].box={x:0,y:0,w:slideSize.w,h:slideSize.h};
+      }
+    }
+    sl._relsPath=`ppt/slides/_rels/slide${i+1}.xml.rels`;
+    const nf=z.file(`ppt/notesSlides/notesSlide${i+1}.xml`);
+    if(nf)sl.note=parseNotesXML(await nf.async('text'));
+    r.push(sl);
+  }
+  // 2단계: 이미지 디코딩 — 1번 슬라이드만 지금 당장 끝내서 바로 보이고 바로 발표 시작 가능하게 하고,
+  // 나머지는 발표가 진행되는 동안 백그라운드에서 한 슬라이드씩(=조절된 속도로) 채운다.
+  // 각 슬라이드의 로딩 완료를 _imagesReady Promise로 남겨둬서, presentSlide/goToSlide가 그 슬라이드를
+  // 실제로 보여주기 직전 "이 슬라이드 로딩 끝났나?"를 확인할 수 있게 한다 — 이미지가 많거나 큰
+  // PPT에서 내레이션이 백그라운드 로딩보다 빨리 넘어가버려 영영 빈 화면으로 남는 걸 막기 위함.
+  if(r[0]){r[0]._imagesReady=resolveSlideImages(z,r[0],r[0]._relsPath);await r[0]._imagesReady}
+  let chain=Promise.resolve();
+  for(let i=1;i<r.length;i++){
+    const idx=i;
+    chain=chain.then(()=>resolveSlideImages(z,r[idx],r[idx]._relsPath)).then(()=>{if(curSlideIdx===idx)renderSlide(idx)});
+    r[idx]._imagesReady=chain;
+  }
+  return r;
+}
+function parseNotesXML(x){const d=new DOMParser().parseFromString(x,'application/xml');const ns='http://schemas.openxmlformats.org/drawingml/2006/main';let n=[...d.getElementsByTagNameNS(ns,'t')].map(t=>t.textContent).join(' ');const tk=n.replace(/\s+/g,' ').trim().split(' ');if(tk.length>1&&/^\d+$/.test(tk[tk.length-1]))tk.pop();return tk.join(' ')}
+
+function splitSentences(text){if(!text)return[];const parts=text.replace(/\s+/g,' ').split(/(?<=[.!?다요님])\s+/);const merged=[];for(const p of parts){const t=p.trim();if(!t)continue;if(merged.length&&merged[merged.length-1].length+t.length<40)merged[merged.length-1]+=' '+t;else merged.push(t)}return merged.filter(s=>s.length>=5)}
+
+async function generateScript(idx){const s=slides[idx];
+// [2026-09-26 실사용 리포트] "슬라이드와 무관한 내용(비판적 사고 등)을 지어냄" — 근본 원인:
+// 프롬프트가 스타일 지시(TED, story 재구성)에 치중해 LLM이 슬라이드 내용을 무시하고 창작.
+// 수정: 노트 중심 + 내용 충실성을 최상위 규칙으로, 스타일은 부가적으로.
+let ctx=`이 슬라이드의 발표 스크립트를 작성하세요.
+
+[최우선 규칙 — 내용 충실성]
+아래 [슬라이드 내용]에 적힌 것 외에 어떤 내용도 만들어내지 마세요.
+슬라이드가 A에 관한 것이면 A에 관해서만 말해야 합니다. B에 관한 일반론이나 철학적 이야기를 끌어오지 마세요.
+슬라이드에 없는 사례, 통계, 개념을 창작하지 마세요.
+
+[소스 우선순위]
+1. 발표자 노트(스피커 노트)가 있으면 → 이것이 발표의 뼈대입니다. 노트의 내용을 자연스러운 구어체로 풀어주세요. 노트에 없는 내용은 추가하지 말고 노트에 있는 내용만 발화하세요.
+2. 노트가 없으면 → 슬라이드의 제목과 불릿 포인트만으로 작성하세요. 각 불릿을 설명하는 문장을 만들되, 외부 지식을 보태지 마세요.
+
+[스타일 — 내용 충실성을 해치지 않는 범위에서만]
+- 정중한 구어체 ("~습니다")
+- 제목을 그대로 읽지 말고 자연스럽게 언급 (단, 내용은 제목과 일치해야 함)
+- "감사합니다", "이상입니다" 등 발표를 마무리하는 인사말은 절대 넣지 마세요. 그런 멘트는 실제 마지막 슬라이드에서 별도 로직이 처리합니다.
+
+${idx>0?'[이전 슬라이드 제목] '+slides[idx-1].title+' (이 내용 다음에 오는 슬라이드입니다)':''}
+
+[슬라이드 내용 — 이것만 발표하세요]
+제목: ${s.title}
+${s.bullets.length?'불릿:\n'+s.bullets.map(b=>'- '+b).join('\n'):''}
+${s.note?'발표자 노트(최우선 소스):\n'+s.note:'(노트 없음 — 불릿만으로 작성)'}
+
+[분량] 30초~1분 (100~250자)
+[출력] 발표 스크립트만 출력하세요. 슬라이드 내용과 무관한 어떤 문장도 포함하지 마세요.`;
+// RAG: 참고 자료에서 관련 청크 검색하여 풍부한 컨텍스트 추가
+if(ragEnabled&&refDocs.length){
+  try{
+    const refs=await searchRef(s.title+' '+s.bullets.join(' '),3);
+    if(refs.length){
+      ctx+='\n\n[참고 자료 — 이 내용을 바탕으로 더 풍부하게 설명하세요 (단, 슬라이드 주제와 관련된 부분만)]\n';
+      ctx+=refs.map((r,i)=>(i+1)+'. '+r.text.slice(0,300)).join('\n');
+    }
+  }catch(e){}
+}
+if(scriptEngine==='openai'){try{const r=await fetch(OPENAI_SCRIPT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));if(j.content&&j.content.length>20){s.script=j.content.trim();return true}}catch(e){}}
+const r=await fetch(LOCAL_LLM,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'qwen3:14b',messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));const t=(j.message&&j.message.content||'').trim();if(t.length>10){s.script=t;return true}s.script=s.note||s.bullets.join('. ')||s.title||'내용이 없습니다.';return s.script.length>5}
+// [2026-10-02] 슬라이드가 많아질수록 전환마다 무음이 길어지는 문제의 핵심 원인 — generateScript(idx+1)이
+// 슬라이드 N이 다 끝난 뒤에야 호출돼서 LLM 왕복을 매번 그대로 기다렸다. ensureScript()는 같은 슬라이드에
+// 대한 생성 요청을 하나의 Promise로 합쳐주는 래퍼 — 이 래퍼 덕분에 "지금 당장 필요해서 부르는 곳"과
+// "미리 당겨서 백그라운드로 부르는 곳"(prefetchNextSlide, 아래)이 서로 중복 호출 없이 안전하게 공존한다.
+function ensureScript(idx){
+  const s=slides[idx];
+  if(s.script)return Promise.resolve(true);
+  if(!s._scriptPromise){
+    s._scriptPromise=generateScript(idx).catch(e=>{console.error('script gen fail:',e);return false}).finally(()=>{s._scriptPromise=null});
+  }
+  return s._scriptPromise;
+}
+function scriptToSentences(script){
+  const ss=splitSentences(script).map(txt=>txt.replace(/https?:\/\/[^\s<>"']+/g,'').trim()).filter(txt=>txt.length>3);
+  return ss.length?ss:[script.replace(/https?:\/\/[^\s<>"']+/g,'').trim()||'발표를 마치겠습니다.'];
+}
+// 슬라이드 idx가 "현재 슬라이드"가 되는 순간(=아직 그 슬라이드가 말하는 중인 동안) 바로 다음 슬라이드의
+// 스크립트와 첫 문장 음성을 미리 만들어둔다 — presentSlide가 실제로 그 슬라이드로 넘어갈 때는 이미
+// 캐시에 있어서 LLM/TTS 왕복을 기다릴 필요가 없다. slides[] 캐시에만 쓰고 재생 상태(curSlideIdx,
+// audioEl 등)는 전혀 안 건드리므로, 사용자가 중간에 다른 슬라이드로 건너뛰어도 안전(헛수고만 될 뿐 깨지지 않음) —
+// 그래서 _playGen 세대 체크가 필요 없다.
+function prefetchNextSlide(idx){
+  const nxt=idx+1;if(nxt>=slides.length)return;
+  const ns=slides[nxt];
+  ensureScript(nxt).then(()=>{
+    if(!ns.script)return;
+    if(!ns._audioCache)ns._audioCache={};
+    if(!ns._audioCache[0]){
+      const sents=scriptToSentences(ns.script);
+      ttsSentence(sents[0]).then(u=>{if(u)ns._audioCache[0]=u}).catch(()=>{});
+    }
+  });
+}
+
+async function ttsSentence(text){if(!text||text.length<3)return null;
+try{
+  if(ttsEngine==='openai'){
+    // [2026-09-29] 네트워크 순간 오류 한 번으로 바로 로컬→브라우저 폴백까지 떨어져
+    // 목소리가 튀는 걸 막기 위해 1회 재시도(200ms 후) — 일시적 오류가 가장 흔한 트리거였음.
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        const r=await fetch('https://bc.wizbase.ai.kr/webhook/koen-openai-tts-bin',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({input:text,voice:ttsVoice,speed:ttsSpeed})});
+        if(r.ok){const b=await r.blob();if(b.size>1000)return URL.createObjectURL(b);console.warn('TTS(openai): 응답 크기 이상',b.size)}
+        else console.warn('TTS(openai) 실패:',r.status,'attempt',attempt)
+      }catch(e){console.warn('TTS(openai) 예외:',e.message,'attempt',attempt)}
+      if(attempt===0)await new Promise(res=>setTimeout(res,200));
+    }
+  }
+  const r=await fetch(TTS_URL,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({model:'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16',input:text,voice:ttsVoice,language:'ko',response_format:'wav',instruct:STYLE})});
+  if(!r.ok){console.warn('TTS(local) 실패:',r.status);return null}
+  const b=await r.blob();if(b.size>1000)return URL.createObjectURL(b);console.warn('TTS(local): 응답 크기 이상',b.size)
+}catch(e){console.warn('TTS 예외:',e)}return null}
+function playAudio(url){return new Promise(r=>{
+  if(!url){r();return}
+  if(audioEl){audioEl.pause();audioEl=null}
+  audioEl=new Audio();
+  ttsSpeaking=true;
+  audioEl.onended=()=>{ttsSpeaking=false;r()};
+  audioEl.onerror=(e)=>{console.warn('오디오 재생 오류:',audioEl.error);ttsSpeaking=false;r()};
+  audioEl.onplay=()=>{renderCaption(curSentenceIdx);hideSearchIndicator()};
+  // [2026-09-29] src 지정 즉시 play()하면 디코더 초기화 전에 재생이 시작돼 첫 음절이 잘리는
+  // 경우가 있었다(느린 PC일수록 잦음). canplay까지 기다린 뒤 재생해 시작 부분 손실을 없앤다.
+  audioEl.oncanplay=()=>{audioEl.play().catch(e=>{console.warn('오디오 재생 차단(자동재생 정책 등):',e.name,e.message);ttsSpeaking=false;r()})};
+  audioEl.src=url;
+  audioEl.load();
+})}
+function speakFB(text){return new Promise(r=>{try{noteSpoken(text);console.warn('TTS 폴백(브라우저 내장 음성) 사용:',text.slice(0,20));const u=new SpeechSynthesisUtterance(text);u.lang='ko-KR';if(_koVoice)u.voice=_koVoice;u.rate=ttsSpeed;u.onstart=hideSearchIndicator;u.onend=()=>r();u.onerror=()=>r();speechSynthesis.cancel();speechSynthesis.speak(u);ttsSpeaking=true}catch(e){hideSearchIndicator();r()}})}
+async function speak(text){
+  if(!text||text.length<2){console.warn('speak: empty text');return}
+  noteSpoken(text);
+  const url=await ttsSentence(text);
+  if(url)await playAudio(url);
+  else{console.warn('TTS fail → browser TTS fallback');await speakFB(text)}
+}
+
+// ── 에코 방지 — AI 자기 음성이 STT로 되돌아와 엉뚱한 인터럽트 유발 방지 ──
+let _lastSpoken='';      // AI가 마지막으로 말한 텍스트 (하위 호환용 참조)
+let _recentSpoken=[];    // 최근 발화 롤링 윈도우(최대 3개) — 문장 경계에 걸쳐 인식된 에코까지 잡기 위함
+function noteSpoken(text){
+  if(!text)return;
+  _lastSpoken=text;
+  _recentSpoken.push(text);
+  if(_recentSpoken.length>3)_recentSpoken.shift();
+}
+
+// [2026-09-29 v2] 예전엔 TTS 종료 후 1.2초간 STT 결과를 무조건 차단했는데(쿨다운), 발표자가
+// 말을 마치자마자 바로 질문하는(가장 흔하고 자연스러운 실제 패턴) 진짜 질문까지 에코로 오인해
+// 그대로 드롭되는 문제였다(재현: TTS 종료 33ms 후 질문 → 무응답, "질문을 받는게 안 된다" 원인).
+// 시간이 아니라 내용이 실제로 최근 발화와 겹치는지로만 판단하도록 변경 — 순수 반향(에코)이면
+// 내용이 겹치고, 새로운 질문이면 안 겹치므로 시간 창을 둘 필요가 없다.
+function isEcho(transcript){
+  if(!transcript||transcript.length<3)return false;
+  // [2026-09-29] 발화 맨 앞부분만 비교(고정 위치)하면, STT가 "이전 문장 끝 + 다음 문장 시작"처럼
+  // 문장 경계에 걸친 토막을 인식했을 때(=발표 문장과 실제로는 겹치지만 앞부분이 안 맞음) 놓쳐서
+  // 질문으로 오인되는 경우가 있었다. 최근 발화 몇 개를 합쳐놓고 슬라이딩 윈도우로 비교해 이런
+  // 경계 걸침도 잡아낸다. 단, "질문 있습니다"/"잠깐만요" 같은 짧은 트리거 문구가 발표 문장과
+  // 우연히 몇 글자만 겹쳐 오탐(=응답 없이 무시됨)되는 것을 막기 위해 충분히 긴 발화에만 적용.
+  if(_recentSpoken.length){
+    const combined=_recentSpoken.join(' ');
+    // [2026-09-29] "안녕하십니까"처럼 짧은 문장(<10자) 하나가 통째로 TTS로 나가는 경우 —
+    // 아래 8자 슬라이딩 윈도우는 transcript보다 길어 아예 못 돌아서 에코를 놓쳤다.
+    // 짧은 발화는 윈도우 없이 직접 포함 여부로 확인.
+    if(transcript.length<10){
+      if(combined.includes(transcript)){
+        console.log('에코(내용 일치, 짧은 발화):',transcript);
+        return true;
+      }
+      return false;
+    }
+    const win=8;
+    for(let i=0;i+win<=transcript.length;i+=4){
+      if(combined.includes(transcript.slice(i,i+win))){
+        console.log('에코(내용 일치):',transcript.slice(0,20));
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function startListening(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return;stopListening();recognizer=new SR();recognizer.lang='ko-KR';recognizer.continuous=true;recognizer.interimResults=true;
+// [2026-09-29] 느린/바쁜 PC에서 STT가 가끔 죽는 문제 — 원인 두 가지:
+// 1) onerror 핸들러가 없어서 'audio-capture'/'network' 등 onend가 안 따라올 수 있는
+//    오류가 나면 재시작 로직이 전혀 안 걸리고 그대로 멈춰버림.
+// 2) onend에서 바로 recognizer.start()를 부르면, 이전 인스턴스 정리가 덜 끝난 상태에서
+//    겹쳐 "already started" 예외가 나고 catch가 조용히 삼켜서 그대로 죽어버림 — 바쁜 PC일수록 잦음.
+recognizer.onerror=(e)=>{
+  console.warn('STT 오류:',e.error);
+  if(sttActive&&(e.error==='audio-capture'||e.error==='network'||e.error==='service-not-allowed')){
+    setTimeout(()=>{if(sttActive)try{recognizer.start()}catch(err){console.warn('STT 재시작 실패:',err.message)}},1000);
+  }
+};
+recognizer.onresult=e=>{
+  for(let i=e.resultIndex;i<e.results.length;i++){
+    const r=e.results[i];if(!r.isFinal)continue;
+    const t=r[0].transcript.trim();
+    // [2026-09-29] "네"/"예" 같은 한 글자 긍정 응답이 길이<2 필터에 걸려 통째로 무시되던 문제 — 예외 처리
+    if((t.length<2&&!/^(네|예|응|넵|넹)$/.test(t))||isHall(t))continue;
+    const intent=detectIntent(t);
+    // 에코 방지 — AI 자기 음성 or 쿨다운 중이면 무시. 단, "질문 있습니다"/"잠깐만요" 같은
+    // 명시적 인터럽트 트리거는 예외 — AI 발화 도중 끼어들면 STT가 AI 발화 꼬리와 사용자 음성을
+    // 한 결과로 합쳐 인식하는 경우가 흔한데, 합쳐진 문장이 길어지면 에코 판정에 걸려 트리거째로
+    // 버려짐. 이런 트리거 문구는 평소 발표 스크립트에 나오지 않으므로 에코 검사를 생략해도 안전.
+    if(intent!=='ask'&&intent!=='pause'&&isEcho(t)){console.log('에코 무시:',t.slice(0,20));continue}
+    // ── qaState별 라우팅 ──
+    if(qaState==='waiting_question'){
+      if(intent==='ask'||intent==='pause'){scheduleWaitQTimer();continue}  // 이미 대기 중 → 재요청은 무시하되 대기 시간 연장
+      if(intent==='question'||intent==='intent'||t.length>10){
+        clearTimeout(_waitQTimer);
+        qaState='answering';handleInterruption(t);return;
+      }
+      scheduleWaitQTimer();continue;  // 짧고 애매한 입력 — 아직 생각 중일 수 있으니 대기 시간만 연장
+    }
+    if(qaState==='confirming'){
+      clearTimeout(_confirmTimer);
+      // 확인 대신 곧바로 다음 질문을 하는 경우(가장 흔한 실제 패턴) — 그대로 답변 흐름으로 연결
+      if(intent==='question'||intent==='ask'||intent==='intent'){
+        qaState='answering';handleInterruption(t);return;
+      }
+      if(/아니|아뇨|더|추가|부족|다시|하나\s*더|질문\s*있/.test(t)){
+        qaState='waiting_question';
+        speakUnified('네, 말씀해 주세요.');
+        scheduleWaitQTimer();
+        return;
+      }
+      if(POSITIVE_RE.test(t)){
+        qaState='idle';
+        if(interrupted&&curSentenceIdx<sentences.length){resumeFromInterrupted()}
+        else{finishPresentation()}
+        return;
+      }
+      // 애매한 발화 — 재촉하지 않고 응답 시간을 좀 더 준다
+      scheduleConfirmTimer();
+      return;
+    }
+    // ── 발표 후 Q&A 시간 (마지막 슬라이드 완료 후) ──
+    if(qaState==='closing_qa'){
+      clearTimeout(_closingTimer);
+      if(/없어|없습니다|아니요|아뇨|괜찮|좋아요|네 네|그래요|진행|시작|이동|ok|go|next/i.test(t)){
+        finishPresentation();
+        return;
+      }
+      // "질문 있습니다" 류 짧은 예고 — 실제 질문은 다음 발화로 받는다(같은 closing_qa 상태 유지,
+      // handleInterruption을 거치면 그쪽의 "네 질문해주세요" 멘트와 겹쳐 어색해지므로 여기서 직접 처리)
+      if(intent==='ask'&&t.length<=15){
+        speakUnified('네, 말씀해 주세요.');
+        _closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},8000);
+        return;
+      }
+      if(intent==='question'||intent==='intent'||t.length>10){
+        (async()=>{
+          qaState='answering';
+          await handleInterruption(t,true);  // closing 흐름 — handleInterruption의 확인 멘트는 생략(아래서 직접 처리)
+          qaState='closing_qa';
+          setStatus('💬 더 질문 있으신가요?');
+          // 재질문 시엔 "이동하겠습니다" 반복 없이 짧게만 — 무응답 대기도 5초로 단축
+          await speakUnified('더 질문 있으신가요?');
+          clearTimeout(_closingTimer);
+          _closingTimer=setTimeout(()=>{
+            if(qaState==='closing_qa')finishPresentation();
+          },5000);
+        })();
+        return;
+      }
+      // 애매한 발화 — 바로 끝내지 않고 응답 시간을 좀 더 준다
+      _closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},8000);
+      return;
+    }
+    // ── 청중 대화 지속 감지 후 일시정지 확인 대기 ──
+    if(qaState==='confirming_continue'){
+      if(intent==='question'||intent==='ask'){
+        qaState='answering';handleInterruption(t);return;
+      }
+      if(RESUME_RE.test(t)||POSITIVE_RE.test(t)){resumeFromBackgroundPause();return}
+      // 대화가 계속됨 — 재개하지 않고 침묵 타이머만 리셋
+      scheduleContinueSilenceTimer();
+      return;
+    }
+    if(!playing||interrupted)return;
+    // ── 발표 중 인텐트 처리 ──
+    if(intent==='pause'){
+      // "잠깐만요" → 일시정지 + 맥락 맞는 질문 유도
+      if(audioEl){audioEl.pause();audioEl=null}
+      try{speechSynthesis.cancel()}catch(e){}
+      ttsSpeaking=false;interrupted=true;
+      document.getElementById('qaBox').style.display='block';
+      document.getElementById('qaBox').textContent='⏸ 일시정지';
+      setStatus('⏸ 일시정지 — 질문 있으신가요?');
+      speakUnified('네, 질문 있으신가요?');
+      qaState='waiting_question';
+      scheduleWaitQTimer();
+      return;
+    }
+    if(intent==='ask'){
+      // "질문 있습니다" → 발표 중지 + 질문 유도
+      if(audioEl){audioEl.pause();audioEl=null}
+      try{speechSynthesis.cancel()}catch(e){}
+      ttsSpeaking=false;interrupted=true;
+      handleInterruption(t);return;
+    }
+    if(intent==='question'||intent==='intent'){
+      // 직접 질문 또는 기타 인텐트 → 즉시 인터럽트+답변
+      if(audioEl){audioEl.pause();audioEl=null}
+      try{speechSynthesis.cancel()}catch(e){}
+      ttsSpeaking=false;
+      handleInterruption(t);return;
+    }
+    // intent === 'none' → 배경 소음/맞장구는 계속 발표하되, 대화가 지속되면(10초 내 3회) 잠시 멈추고 확인
+    if(intent==='none'){
+      const now=Date.now();
+      _bgTalkTimes.push(now);_bgTalkTimes=_bgTalkTimes.filter(x=>now-x<BG_TALK_WINDOW_MS);
+      if(_bgTalkTimes.length>=BG_TALK_THRESHOLD){_bgTalkTimes=[];pauseForBackgroundTalk()}
+    }
+  }
+};recognizer.onend=()=>{if(sttActive){setTimeout(()=>{if(sttActive)try{recognizer.start()}catch(e){console.warn('STT 재시작 실패:',e.message)}},250)}};try{recognizer.start();sttActive=true}catch(e){console.warn('STT 시작 실패:',e.message)}}
+function stopListening(){sttActive=false;if(recognizer){try{recognizer.stop()}catch(e){}recognizer=null}}
+
+// ── Q&A 멀티에이전트 오케스트레이션 v2 ──
+// 핵심: 추임새는 브라우저 TTS(0초 즉시)로, 실제 답변만 OpenAI TTS(고품질)로.
+// 추임새가 네트워크 왕복(2~5초) 때문에 침묵 후 나오던 문제를 원천 해결.
+let _fillerIdx=0;
+const FILLERS=[
+  q=>'좋은 질문입니다. '+shorten(q)+'에 대한 내용이 맞을까요? 잠시 확인해 보겠습니다.',
+  q=>'아, 이해했습니다. '+shorten(q)+'에 대해 말씀하시는 거군요. 관련 자료를 찾아볼게요.',
+  q=>'네, 좋은 포인트입니다. '+shorten(q)+' 관련해서 잠시 생각해 보겠습니다.',
+  q=>'말씀하신 질문이 '+shorten(q)+' 맞을까요? 아, 네. 잠시 확인하겠습니다.',
+];
+function shorten(q){const t=q.replace(/[?.!]/g,'').trim();return t.length>25?t.slice(0,25)+'… 관련':t+' 관련'}
+function nextFiller(q){const f=FILLERS[_fillerIdx++%FILLERS.length];return f(q)}
+// 질문이 명확히 인식됐을 때(=detectIntent==='question')는 질문을 되풀이해 확인하지 않고 바로 답변 준비로 넘어감
+let _plainFillerIdx=0;
+const PLAIN_FILLERS=['네, 답변 드리겠습니다.','네, 확인해 보겠습니다.','알겠습니다, 잠시만요.','네, 바로 답변 드릴게요.'];
+function nextPlainFiller(){return PLAIN_FILLERS[_plainFillerIdx++%PLAIN_FILLERS.length]}
+
+async function generateAnswer(q){
+  const s=slides[curSlideIdx];
+  let ctx='당신은 발표 중입니다. 청중이 질문했습니다. 간결하고 명확하게 답하세요(2~3문장).\n[슬라이드] '+(s?s.title:'')+'\n[발표 중 문장] '+(sentences[curSentenceIdx]||'')+'\n[질문] '+q;
+  if(ragEnabled&&refDocs.length){
+    try{const refs=await searchRef(q,3);if(refs.length)ctx+='\n[참고 자료]\n'+refs.map((r,i)=>(i+1)+'. '+r.text.slice(0,300)).join('\n')}catch(e){}
+  }
+  let ans='';
+  if(scriptEngine==='openai'){
+    try{const r=await fetch(OPENAI_SCRIPT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));ans=(j.content||'').trim()}catch(e){}
+  }
+  if(!ans){
+    try{const r=await fetch(LOCAL_LLM,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'qwen3:14b',messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));ans=(j.message&&j.message.content||'').trim()}catch(e){}
+  }
+  if(!ans)ans='죄송합니다, 발표 후 더 자세히 답변드리겠습니다.';
+  if(HANJA.test(ans))ans=ans.replace(/[一-鿿]+/g,'');
+  return ans;
+}
+
+async function handleInterruption(q,fromClosing){
+  // ── 0ms: 즉시 음성 정지 ──
+  interrupted=true;
+  if(audioEl){audioEl.pause();audioEl=null}
+  try{speechSynthesis.cancel()}catch(e){}
+  ttsSpeaking=false;
+  const qa=document.getElementById('qaBox');qa.style.display='block';
+
+  // "질문 있습니다" 류 → 브라우저 TTS로 즉시 응답 (0초)
+  if(detectIntent(q)==='ask'){
+    qa.textContent='💬 질문을 기다리고 있습니다…';
+    setStatus('💬 질문해 주세요');
+    speakUnified('네, 질문해 주세요.');
+    qaState='waiting_question';
+    scheduleWaitQTimer();
+    return;
+  }
+
+  // ── 본격 질문 → 3중 병렬 실행 ──
+  qa.textContent='💬 질문: '+q;
+  setStatus('💬 답변 준비 중…');
+
+  // A) 즉시: 브라우저 TTS 추임새 (0ms 시작 — 침묵 없음)
+  // 질문이 명확히 인식됐으면(detectIntent==='question') 되묻지 않고 바로 답변 준비 멘트만, 불명확하면 질문을 되풀이해 확인
+  const fillerPromise=speakUnified(detectIntent(q)==='question'?nextPlainFiller():nextFiller(q));
+
+  // B) 병렬: RAG 검색 + LLM 답변 생성 — 추임새(음성)와 별개로, 화면엔 음성 없이 "검색중" 표시
+  showSearchIndicator();
+  const answerPromise=generateAnswer(q).finally(hideSearchIndicator);
+
+  // C) 추임새 재생 완료 대기 → 답변 TTS (OpenAI 고품질)
+  await fillerPromise;
+  setStatus('💬 답변 중…');
+  const answer=await answerPromise;
+  qa.textContent+='\n\n💡 '+answer.slice(0,200);
+  // 두 번째 침묵 구간 — 답변 텍스트는 나왔지만 TTS 음성이 아직 생성 전이라 다시 잠깐 조용해짐.
+  // 실제 재생이 시작되면(오디오 onplay) 자동으로 사라짐(hideSearchIndicator).
+  showSearchIndicator();
+  await speak(answer);  // OpenAI TTS — 여기서만 네트워크 비용 지불
+
+  // D) 확인 — closing_qa(발표 종료 후 Q&A)에서 호출된 경우엔 호출부가 자체적으로
+  // "더 질문 있으신가요?"를 이어서 말하므로, 여기서 또 물으면 멘트가 겹쳐 어색해진다 → 생략.
+  if(fromClosing)return;
+  await speakUnified('다른 질문 없으시면 계속 발표해도 될까요?');
+  // 발표 중 인터럽트면 confirming, Q&A 종료 중이면 confirming 후 closing_qa 복귀
+  qaState='confirming';
+  setStatus('💬 다른 질문 있으시면 말씀해 주세요');
+  scheduleConfirmTimer();
+}
+let _confirmTimer=null;
+function scheduleConfirmTimer(){
+  clearTimeout(_confirmTimer);
+  _confirmTimer=setTimeout(()=>{if(qaState==='confirming'){qaState='idle';resumeFromInterrupted()}},8000);
+}
+// "질문 있으신가요?"/"네, 말씀해 주세요" 후 사용자가 실제 질문을 안 하고 계속 침묵하면
+// 무한정 멈춰있지 않도록 — 일정 시간 후 자동으로 발표를 재개한다. 도중에 아무 말이라도
+// 감지되면(아직 생각 중일 수 있으니) 매번 다시 연장한다.
+let _waitQTimer=null;
+function scheduleWaitQTimer(){
+  clearTimeout(_waitQTimer);
+  _waitQTimer=setTimeout(async()=>{
+    if(qaState==='waiting_question'){
+      qaState='idle';
+      await speakUnified('질문이 없으시면 계속 진행하겠습니다.');
+      resumeFromInterrupted();
+    }
+  },12000);
+}
+async function resumeFromInterrupted(){
+  interrupted=false;
+  document.getElementById('qaBox').style.display='none';
+  setStatus('▶ 발표 재개 — 끊긴 문장부터 다시');
+  // 끊긴 문장을 처음부터 재발화 (curSentenceIdx 유지)
+  playSentenceStream(curSentenceIdx);
+}
+function pauseForBackgroundTalk(){
+  if(!playing||interrupted)return;
+  if(audioEl){audioEl.pause();audioEl=null}
+  try{speechSynthesis.cancel()}catch(e){}
+  ttsSpeaking=false;interrupted=true;
+  document.getElementById('qaBox').style.display='block';
+  document.getElementById('qaBox').textContent='⏸ 대화가 계속되어 잠시 멈췄습니다';
+  setStatus('⏸ 계속 발표할까요?');
+  speakUnified('계속 발표할까요?');
+  qaState='confirming_continue';
+  scheduleContinueSilenceTimer();
+}
+function scheduleContinueSilenceTimer(){
+  clearTimeout(_continueSilenceTimer);
+  _continueSilenceTimer=setTimeout(()=>{if(qaState==='confirming_continue')resumeFromBackgroundPause()},CONTINUE_SILENCE_MS);
+}
+function resumeFromBackgroundPause(){
+  clearTimeout(_continueSilenceTimer);
+  qaState='idle';
+  resumeFromInterrupted();
+}
+// handleQA → handleInterruption으로 통합 (중복 제거)
+// [경쟁 상태 수정] 세대 카운터 — 이전 슬라이드의 playSentenceStream 체인이 새 슬라이드 전환 후
+// 잔류 실행돼 화면 렌더링을 밀어내는 것을 방지. presentSlide 호출 시 세대 증가 → 이전 체인은 자동 abort.
+let _playGen=0;
+async function playSentenceStream(idx){
+  const gen=_playGen;  // 이 체인의 세대 캡처
+  if(!playing||interrupted)return;
+  if(idx>=sentences.length){
+    if(curSlideIdx<slides.length-1)await presentSlide(curSlideIdx+1);
+    else{await startClosingQA()}
+    return
+  }
+  curSentenceIdx=idx;setStatus(`▶ ${idx+1}/${sentences.length} — 슬라이드 ${curSlideIdx+1}/${slides.length}`);
+  // ── 동기화 자가 점검 — 화면이 발화 중인 슬라이드와 다르면 AI가 인지하고 복구 ──
+  if(_visualSlideIdx!==curSlideIdx){
+    console.log(`sync mismatch: visual=${_visualSlideIdx}, audio=${curSlideIdx} → 자가 복구`);
+    const msg=SYNC_CORRECTIONS[_syncCorrIdx++%SYNC_CORRECTIONS.length];
+    await speakUnified(msg);
+    if(gen!==_playGen)return;  // 복구 멘트 중 다른 슬라이드로 전환됐으면 중단
+    renderSlide(curSlideIdx);   // 화면 복구
+  }
+  const cs=slides[curSlideIdx];let url=cs._audioCache&&cs._audioCache[idx];if(cs._audioCache)delete cs._audioCache[idx];
+  if(!url){
+    setStatus(`🔊 문장 ${idx+1} 변환 중…`);
+    url=await ttsSentence(sentences[idx]);
+  }
+  // 세대 체크 — presentSlide가 다시 호출됐으면 이 체인은 폐기
+  if(gen!==_playGen){console.log('stale chain aborted, slide',curSlideIdx);return}
+  if(url){noteSpoken(sentences[idx]);await playAudio(url)}else await speak(sentences[idx]);  // 에코(자기 목소리 재인식) 방지에 필수
+  if(interrupted)return;
+  if(gen!==_playGen)return;
+  // ③ 문장 간 자연스러운 쉼 (0.7초) — 급하지 않게, 관객이 따라올 시간
+  if(idx+1<sentences.length){
+    await new Promise(r=>setTimeout(r,700));
+    if(gen!==_playGen)return;  // 쉼 중 전환 체크
+  }
+  playSentenceStream(idx+1)}
+
+async function presentSlide(idx){
+  if(!playing)return;
+  _bgTalkTimes=[];  // 새 슬라이드 — 대화 지속 감지 카운터 초기화
+  const gen=++_playGen;  // 모든 이전 체인 무효화
+  // 현재 오디오 정지 — 새 슬라이드 시작 전 깨끗하게
+  if(audioEl){audioEl.pause();audioEl=null}
+  try{speechSynthesis.cancel()}catch(e){}
+  ttsSpeaking=false;
+  curSlideIdx=idx;const s=slides[idx];
+  prefetchNextSlide(idx);  // 이 슬라이드가 말하는 동안 다음 슬라이드 스크립트+첫 문장 음성을 미리 준비
+if(!s.script){setStatus('🧑‍🏫 슬라이드 '+(idx+1)+' 준비 중…');
+  const ok=await ensureScript(idx);
+  if(!ok||!s.script||s.script.length<10){s.script=s.note||s.bullets.join('. ')||s.title||'발표를 시작합니다.';}
+}
+// 스크립트 생성 후 세대 체크 — 대기 중 다른 슬라이드로 전환됐으면 중단
+if(gen!==_playGen){console.log('presentSlide stale after script gen');return}
+// URL은 발화에서 제거 — AI가 "h-t-t-p-s-colon-slash-slash..."라고 영어로 읽지 않게
+sentences=scriptToSentences(s.script);
+curSentenceIdx=0;
+// [2026-10-01] 이미지가 크거나 많은 PPT("Flattened"류 — 슬라이드 1장이 고해상도 이미지 1장)에서
+// 백그라운드 이미지 로딩이 내레이션 속도를 못 따라가면, 이 슬라이드가 아직 로딩 중인 채로
+// renderSlide가 먼저 불려 빈 화면으로 보이고, 이미 다음 슬라이드로 넘어간 뒤에야 로딩이 끝나
+// 영영 다시 안 그려지는 문제가 있었다. 실제로 그리기 직전 이 슬라이드 이미지 로딩만 기다려서
+// 막는다 — 보통은 이미 끝나 있어 체감 지연 없음, 못 따라간 경우에만 잠깐 기다렸다 제대로 보임.
+if(s._imagesReady)await s._imagesReady;
+if(gen!==_playGen)return;
+renderSlide(idx);  // ① 화면 먼저 전환
+
+// ② 화면 전환 확인 + 관객이 새 슬라이드를 볼 시간 (1.5초 의도적 정지)
+setStatus('📄 슬라이드 '+(idx+1)+'/'+slides.length+' — 화면 전환');
+// [2026-10-02] 예전엔 스크립트/TTS 지연을 가려주는 버퍼 역할까지 겸해서 1.5초였는데, 이제 다음 슬라이드
+// 준비는 prefetchNextSlide가 이전 슬라이드 재생 중에 미리 끝내두므로 순수 "화면 전환 인지" UX 여백만 필요.
+await new Promise(r=>setTimeout(r,800));
+if(gen!==_playGen)return;  // 정지 중 전환됐으면 중단
+if(!playing)return;
+// ── 병렬 TTS 프리페치 — 슬라이드의 모든 문장을 동시에 변환 시작 ──
+// 첫 문장은 playSentenceStream에서 직접 대기, 나머지는 백그라운드에서 병렬 생성.
+// 문장 N 재생이 끝날 때쯤 문장 N+1~는 이미 캐시에 있음 → 무음 구간 0초.
+// [2026-10-02] s._audioCache는 더 이상 여기서 통째로 비우지 않음 — prefetchNextSlide가 이전 슬라이드
+// 재생 중에 이미 문장 0번을 채워놨을 수 있는데, 예전처럼 비워버리면 그 작업이 버려져서
+// playSentenceStream이 같은 문장을 또 fetch하는 중복 호출이 발생했었다.
+if(!s._audioCache)s._audioCache={};
+sentences.forEach((text,i)=>{
+  if(!s._audioCache[i]){
+    ttsSentence(text).then(u=>{if(u)s._audioCache[i]=u}).catch(()=>{});
+  }
+});
+await playSentenceStream(0)}
+
+function renderSlide(idx){
+  _visualSlideIdx=idx;  // 동기화 점검용 — 실제로 그린 슬라이드 기록
+  const s=slides[idx];const el=document.getElementById('slideContent');
+  const sz=s.slideSize;
+  // 모든 도형에 위치 정보(xfrm)가 있을 때만 원본 배치 그대로 겹쳐 그림 — 하나라도 없으면
+  // (레이아웃 상속 placeholder 등 드문 케이스) 안전하게 기존 스택형 렌더링으로 폴백.
+  const positioned=sz&&s.shapes&&s.shapes.length&&s.shapes.every(sh=>sh.box);
+  // [2026-10-01 진단용] 오른쪽 여백 재현 추적 — 실제 박스 %를 찍어서 추측 대신 숫자로 원인을 좁힌다.
+  console.log(`슬라이드 ${idx+1} 렌더(${positioned?'위치지정':'폴백'}) slideSize=${sz?sz.w+'x'+sz.h:'?'}`,
+    (s.shapes||[]).map(sh=>sh.box?`${sh.type}:${(sh.box.x/sz.w*100).toFixed(1)}%,${(sh.box.y/sz.h*100).toFixed(1)}% ${(sh.box.w/sz.w*100).toFixed(1)}%x${(sh.box.h/sz.h*100).toFixed(1)}%`:`${sh.type}:box없음`));
+  if(positioned){
+    const body=s.shapes.map(sh=>{
+      const b=sh.box;
+      const pos=`left:${(b.x/sz.w*100).toFixed(3)}%;top:${(b.y/sz.h*100).toFixed(3)}%;width:${(b.w/sz.w*100).toFixed(3)}%;height:${(b.h/sz.h*100).toFixed(3)}%;`;
+      if(sh.type==='image')return sh.src?`<img class="slideShapeImg" style="${pos}" src="${sh.src}"/>`:'';
+      // ponytail: 폰트 크기는 박스 높이 비율로 근사(실제 <a:rPr sz> 미반영) — 틀어지면 다음 단계로 rPr 읽기 추가
+      const fs=(b.h/sz.h*100*(sh.type==='title'?0.6:0.22)).toFixed(2);
+      const clampLo=sh.type==='title'?14:10,clampHi=sh.type==='title'?64:32;
+      return `<div class="${sh.type==='title'?'slideShapeTitle':'slideShapeText'}" style="${pos}font-size:clamp(${clampLo}px,${fs}vh,${clampHi}px)">${esc(sh.text)}</div>`;
+    }).join('');
+    el.innerHTML=`<div class="slideCanvas" style="aspect-ratio:${sz.w}/${sz.h}">${body}</div>`;
+  }else{
+    let h='';if(s.title)h+='<h2>'+esc(s.title)+'</h2>';if(s.bullets.length)h+='<ul>'+s.bullets.map(b=>'<li>'+esc(b)+'</li>').join('')+'</ul>';
+    const imgs=(s.shapes||[]).filter(sh=>sh.type==='image'&&sh.src).map(sh=>sh.src).concat(s.images||[]);
+    imgs.forEach(u=>{h+='<img src="'+u+'"/>'});
+    el.innerHTML=h||'<p style="color:var(--mut);text-align:center;margin-top:40vh">빈 슬라이드</p>';
+  }
+  document.getElementById('sldNum').textContent=(idx+1)+' / '+slides.length;document.getElementById('progBar').style.width=((idx+1)/slides.length*100)+'%';document.querySelectorAll('.sldItem').forEach((e,i)=>e.classList.toggle('cur',i===idx))}
+// 발표 중이 아닐 때(사이드바 미리보기 클릭 등)도 백그라운드 이미지 로딩을 기다렸다 그려서 같은
+// "로딩 안 끝났는데 빈 화면으로 보임" 문제를 막는다 — presentSlide가 쓰는 것과 같은 안전장치.
+async function renderSlideWhenReady(idx){
+  const s=slides[idx];
+  if(s&&s._imagesReady)await s._imagesReady;
+  if(curSlideIdx===idx)renderSlide(idx);
+}
+// 캡션 — 오디오 재생 시작 시점에 표시 (동기화)
+function renderCaption(idx){
+  const ticker=document.getElementById('ticker');
+  const span=document.getElementById('tickerText');
+  if(!ticker||!span)return;
+  if(idx>=sentences.length){ticker.style.display='none';return}
+  const text=sentences[idx];
+  ticker.style.display='flex';
+  span.style.display='';
+  span.textContent=text;
+  // 페이드 트랜지션
+  span.style.opacity='0';
+  requestAnimationFrame(()=>{span.style.transition='opacity .3s';span.style.opacity='1'});
+}
+// [2026-09-28, 사용자 요청] "질문 답변을 찾는 동안 캡션 바 아래에(음성 출력 없이) AI 답변 검색중
+// 표시 + 진행바" — 캡션 텍스트를 잠시 감추고 같은 박스에 검색 표시줄을 띄운다. speakUnified 등
+// 음성 함수를 전혀 호출하지 않는 순수 시각 표시라 음성 출력과 무관하다.
+function showSearchIndicator(){
+  const ticker=document.getElementById('ticker');
+  const span=document.getElementById('tickerText');
+  const ind=document.getElementById('searchIndicator');
+  if(!ticker||!ind)return;
+  ticker.style.display='flex';
+  if(span)span.style.display='none';
+  ind.classList.add('show');
+}
+function hideSearchIndicator(){
+  const ticker=document.getElementById('ticker');
+  const span=document.getElementById('tickerText');
+  const ind=document.getElementById('searchIndicator');
+  if(!ind)return;
+  ind.classList.remove('show');
+  if(span)span.style.display='';
+  // 검색 중 가려뒀던 이전 캡션이 없으면(또는 발표가 곧 재개돼 renderCaption이 다시 그릴 것이므로)
+  // 굳이 빈 박스를 남겨두지 않는다 — 다음 캡션/발화가 스스로 ticker를 다시 켠다.
+  if(ticker&&(!span||!span.textContent))ticker.style.display='none';
+}
+
+// [2026-09-29] 전체화면 전환이 끝나기 전에 슬라이드가 먼저 그려지면(네트워크/TTS 타이밍에 따라
+// 슬라이드마다 다름) 브라우저 확대/축소 상태가 슬라이드별로 다르게 굳어버리는 경우가 있었다.
+// requestFullscreen()의 완료를 기다린 뒤 렌더링을 시작하고, 전체화면 상태가 바뀔 때마다
+// 현재 슬라이드를 강제로 다시 그려 배율을 항상 최신 뷰포트 기준으로 맞춘다.
+function enterFS(){
+  const el=document.documentElement;
+  document.querySelector('.topBar').style.display='none';
+  document.getElementById('ctrlBar').classList.remove('hidden');
+  document.getElementById('btnPanel').style.display='flex';
+  if(el.requestFullscreen)return el.requestFullscreen().catch(()=>{});
+  if(el.webkitRequestFullscreen)el.webkitRequestFullscreen();
+  return Promise.resolve();
+}
+function exitFS(){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});else if(document.webkitFullscreenElement)document.webkitExitFullscreen();document.querySelector('.topBar').style.display='flex'}
+document.addEventListener('fullscreenchange',()=>{
+  if(!document.fullscreenElement)document.querySelector('.topBar').style.display='flex';
+  if(curSlideIdx>=0&&slides[curSlideIdx])renderSlide(curSlideIdx);  // 배율/레이아웃 재계산
+});
+
+function togglePanel(){panelOpen=!panelOpen;document.getElementById('sidePanel').classList.toggle('open',panelOpen);document.getElementById('slideWrap').classList.toggle('panelOpen',panelOpen)}
+document.getElementById('btnPanel').onclick=togglePanel;
+function openSettings(){document.getElementById('settingsModal').classList.add('show');updatePPTList();updateRefDocList();document.getElementById('speedSlider').value=ttsSpeed;document.getElementById('speedVal').textContent=ttsSpeed.toFixed(2)+'x';updateSpeedTotalTime()}
+function closeSettings(){document.getElementById('settingsModal').classList.remove('show')}
+document.getElementById('btnSettings').onclick=openSettings;
+document.getElementById('settingsModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeSettings()});
+function setScriptEngine(m){scriptEngine=m;document.getElementById('setScrOpenAI').classList.toggle('on',m==='openai');document.getElementById('setScrLocal').classList.toggle('on',m==='local')}
+const OPENAI_VOICES=['alloy','echo','fable','onyx','nova','shimmer'];
+// [2026-10-02] 엔진/보이스를 바꾸면 이전 설정으로 미리 만들어둔 캐시 음성(prefetchNextSlide가 채워둔
+// s._audioCache, pregenPhrases가 채워둔 promptCache)이 새 설정과 안 맞는 채로 남아있을 수 있어 비움 —
+// 안 비우면 설정을 바꿔도 다음 한두 마디는 예전 목소리로 나가는 혼란이 생긴다.
+function invalidateVoiceCaches(){slides.forEach(s=>{s._audioCache=null});promptCache={}}
+function setTtsEngine(m){
+  ttsEngine=m;
+  document.getElementById('ttsOpenAI').classList.toggle('on',m==='openai');
+  document.getElementById('ttsLocal').classList.toggle('on',m==='local');
+  document.getElementById('voiceRowOpenAI').style.display=m==='openai'?'flex':'none';
+  document.getElementById('voiceRowLocal').style.display=m==='local'?'flex':'none';
+  if(m==='openai'&&!OPENAI_VOICES.includes(ttsVoice))setVoice('nova');
+  if(m==='local'&&OPENAI_VOICES.includes(ttsVoice))setVoice('eric');
+  invalidateVoiceCaches();
+}
+function setVoice(v){
+  ttsVoice=v;
+  ['Alloy','Echo','Fable','Onyx','Nova','Shimmer','Eric','Dylan','Sohee'].forEach(n=>{const e=document.getElementById('v'+n);if(e)e.classList.toggle('on',n.toLowerCase()===v)});
+  invalidateVoiceCaches();
+}
+function setRagEnabled(v){ragEnabled=v;document.getElementById('ragOn').classList.toggle('on',v);document.getElementById('ragOff').classList.toggle('on',!v)}
+
+async function startPresentation(){playing=true;interrupted=false;pregenPhrases();document.getElementById('btnPlay').textContent='⏸';await enterFS();startListening();await presentSlide(Math.max(curSlideIdx,0))}
+function pausePresentation(){playing=false;document.getElementById('btnPlay').textContent='▶';if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}
+function stopAll(){playing=false;interrupted=false;document.getElementById('btnPlay').textContent='▶';if(audioEl){audioEl.pause();audioEl=null}stopListening();setStatus('정지')}
+// ── 마지막 슬라이드 발표 완료 → Q&A 시간 → URL 열기 ──
+let _closingTimer=null;
+function extractURL(){
+  const lastSlide=slides[slides.length-1];
+  if(!lastSlide)return null;
+  const text=(lastSlide.note||'')+' '+(lastSlide.script||'');
+  const m=text.match(/https?:\/\/[^\s<>"']+/);
+  return m?m[0]:null;
+}
+async function startClosingQA(){
+  playing=false;interrupted=false;
+  document.getElementById('btnPlay').textContent='▶';
+  setStatus('💬 질문 & 답변 시간');
+  // 마지막 슬라이드의 노트/스크립트에 이미 마무리 멘트가 있으면 그대로 사용
+  const lastSlide=slides[slides.length-1];
+  const hasClosingMent=(lastSlide.note||lastSlide.script||'').includes('질문 있');
+  if(!hasClosingMent){
+    // "더 이상 질문이 없으시면 이동하겠습니다"는 첫 안내에서 한 번만 말하고, 이후 재질문 시엔 반복하지 않음
+    await speakUnified('제가 준비한 발표 자료는 여기까지입니다. 질문 있으신가요? 더 이상 질문이 없으시면 시연 사이트로 이동하겠습니다.');
+  }
+  // hasClosingMent=true면 이미 마지막 슬라이드 발표에서 "질문 있으신가요?"를 말했음
+  qaState='closing_qa';
+  // 첫 무응답 대기는 10초
+  clearTimeout(_closingTimer);
+  _closingTimer=setTimeout(()=>{
+    if(qaState==='closing_qa')finishPresentation();
+  },10000);
+}
+async function finishPresentation(){
+  clearTimeout(_closingTimer);
+  qaState='idle';
+  const url=extractURL();
+  stopAll();
+  exitFS();
+  if(url){
+    // 마지막 멘트는 이미 슬라이드 발표에서 나갔으므로 추가 멘트 없이 즉시 이동
+    setStatus('🌐 이동: '+url);
+    window.location.href=url;
+  }else{
+    setStatus('✅ 발표 완료');
+    speakUnified('감사합니다.');  // URL 없을 때만 감사 멘트
+  }
+}
+document.getElementById('btnPlay').onclick=()=>playing?pausePresentation():startPresentation();
+document.getElementById('btnStop').onclick=()=>{stopAll();exitFS()};
+// ── 슬라이드 넘기기 — 발표 중에도 건너뛰기 가능 ──
+function goToSlide(idx){
+  if(idx<0||idx>=slides.length)return;
+  if(audioEl){audioEl.pause();audioEl=null}
+  try{speechSynthesis.cancel()}catch(e){}
+  ttsSpeaking=false;interrupted=false;qaState='idle';
+  if(playing){
+    presentSlide(idx);
+  }else{
+    curSlideIdx=idx;
+    renderSlideWhenReady(idx);
+    ensureScript(idx).then(ok=>{
+      if(ok)document.getElementById('scriptBox').textContent=slides[idx].script;
+    });
+  }
+}
+document.getElementById('btnPrev').onclick=()=>goToSlide(Math.max(curSlideIdx-1,0));
+document.getElementById('btnNext').onclick=()=>{
+  if(curSlideIdx<slides.length-1)goToSlide(curSlideIdx+1);
+  else if(playing)startClosingQA();
+};
+
+async function handleFile(file){setStatus('📄 파싱 중…');document.getElementById('uploadScreen').style.display='none';try{slides=await parsePPTX(file);const list=document.getElementById('slideList');list.innerHTML='';slides.forEach((s,i)=>{const d=document.createElement('div');d.className='sldItem';d.innerHTML='<span class="num">'+(i+1)+'</span><span>'+esc(s.title||'무제')+'</span>';d.onclick=()=>{if(!playing){curSlideIdx=i;renderSlideWhenReady(i)}};list.appendChild(d)});if(slides.length){renderSlide(0);curSlideIdx=0;setStatus(slides.length+'개 슬라이드 — [▶ 발표] 시작');document.getElementById('ctrlBar').classList.remove('hidden');document.getElementById('btnNewFile').style.display='flex';// [2026-10-01] 파일이 크면 음성 출력이 지연되던 원인 중 하나 — 예전엔 저장을 위해 이미지 blob URL을
+// fetch()로 다시 읽어 arrayBuffer로 변환했는데(슬라이드별 이미지마다 네트워크 왕복 1회씩, 전부
+// Promise.all로 동시에), 이게 발표 시작 직후 TTS 생성과 메인 스레드/네트워크를 두고 경쟁해 1번
+// 슬라이드 음성까지 늦어졌다. 이제 파싱 때 이미 들고 있는 Blob을 그대로 재사용(재fetch 불필요)하고,
+// 저장 자체도 requestIdleCallback으로 미뤄 브라우저가 한가할 때(=발표 음성이 안 밀릴 때) 실행한다.
+const ric=window.requestIdleCallback||(fn=>setTimeout(fn,500));
+ric(async()=>{
+  try{
+    const sv=await slidesToJsonSafe(slides);
+    await apiJson('/ppt-agent/api/ppts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:file.name,slides:sv})});
+    console.log('PPT saved');
+  }catch(e){console.warn('PPT save fail:',e)}
+},{timeout:8000});
+ensureScript(0)}}catch(e){setStatus('❌ '+e.message);document.getElementById('uploadScreen').style.display='flex'}}
+
+const dz=document.getElementById('dropZone');
+dz.addEventListener('click',()=>document.getElementById('fileInput').click());
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag')});
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');const f=e.dataTransfer.files[0];if(f&&f.name.endsWith('.pptx'))handleFile(f)});
+document.getElementById('fileInput').addEventListener('change',e=>{if(e.target.files[0])handleFile(e.target.files[0])});
+// 참고 자료 업로드
+document.getElementById('refZone').addEventListener('click',()=>document.getElementById('refInput').click());
+document.getElementById('refInput').addEventListener('change',e=>{if(e.target.files.length)loadRefDocs([...e.target.files])});
+
+document.addEventListener('keydown',e=>{if(e.key===' '&&slides.length){e.preventDefault();playing?pausePresentation():startPresentation()}if(e.key==='ArrowRight')document.getElementById('btnNext').click();if(e.key==='ArrowLeft')document.getElementById('btnPrev').click();if(e.key==='Escape')closeSettings();if(e.key==='p'||e.key==='P')togglePanel()});
+let ctrlTimer;function revealCtrl(){const bar=document.getElementById('ctrlBar');if(bar&&slides.length){bar.classList.remove('hidden');clearTimeout(ctrlTimer);ctrlTimer=setTimeout(()=>{if(playing)bar.classList.add('hidden')},3000)}}
+document.addEventListener('mousemove',revealCtrl);
+document.addEventListener('touchstart',revealCtrl,{passive:true});
+</script>
+</body>
+</html>
