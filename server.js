@@ -257,6 +257,9 @@ function admTab(t){
   window.scrollTo({top:0,left:0});
   return false;
 }
+// [2026-10-05] 새로고침·하위페이지 복귀 시 해시(#knowledge 등)로 탭 복원 — 지식 수정 페이지의
+// "취소 — 지식 관리로" 링크(/admin#knowledge)가 이 복원에 의존한다.
+try{const _h=(location.hash||'').replace('#','');if(_h)admTab(_h)}catch(e){}
 // 문서 탭 안의 서브탭(전체 시스템 문서 ↔ 모델 교체 평가 문서) — 보기 전환 + 다운로드 버튼 동기화
 function docTab(name){
   const sys=name==='sys';
@@ -610,14 +613,16 @@ function knowledgePanel(kuid) {
     const origin = d.origin || 'manual';
     const conf = d.confidence == null ? 1 : d.confidence;
     return `<tr>
-<td>${d.is_primary ? '⭐ ' : ''}${esc(d.name)}<br><small style="color:#767b86">${fmtBytes(d.source_bytes || 0)} · ${docCountChunks(d.id)}청크</small></td>
+<td><input type="checkbox" class="knowChk" form="knowBulkForm" name="ids" value="${d.id}" data-auto="${origin === 'auto' ? 1 : 0}" style="vertical-align:middle"></td>
+<td>${d.is_primary ? '⭐ ' : ''}<a href="${PREFIX}/admin/knowledge/${d.id}/edit" style="color:#c9cdd6;text-decoration:none" title="내용 열람·수정">${esc(d.name)}</a><br><small style="color:#767b86">${fmtBytes(d.source_bytes || 0)} · ${docCountChunks(d.id)}청크</small></td>
 <td>${origin === 'auto' ? '<span class="pill" style="background:#2b5fd9">🧠 자동</span>' : '<span class="pill" style="background:#3a3a44">📎 수동</span>'}</td>
 <td>${confBadge(conf)}</td>
 <td>${confBtns(d)}</td>
 <td>${esc((d.created_at || '').slice(0, 10))}</td>
-<td><form class="inline" method="post" action="${PREFIX}/admin/knowledge/delete" onsubmit="return confirm('${esc(d.name)} 을(를) 삭제할까요?${origin === 'auto' ? ' 이 질문은 재습득 대상에서도 제외됩니다.' : ''}')"><input type="hidden" name="id" value="${d.id}"><button class="actBtn" type="submit" style="background:#8a3030">삭제</button></form></td>
+<td><a class="actBtn" href="${PREFIX}/admin/knowledge/${d.id}/edit" style="text-decoration:none;display:inline-block;background:#2b5fd9">✏️ 수정</a>
+<form class="inline" method="post" action="${PREFIX}/admin/knowledge/delete" onsubmit="return confirm('${esc(d.name)} 을(를) 삭제할까요?${origin === 'auto' ? ' 이 질문은 재습득 대상에서도 제외됩니다.' : ''}')"><input type="hidden" name="id" value="${d.id}"><button class="actBtn" type="submit" style="background:#8a3030">삭제</button></form></td>
 </tr>`;
-  }).join('') || '<tr><td colspan="6" style="color:#888">문서 없음 — 발표 화면 업로드 또는 아래 수동 추가 사용</td></tr>';
+  }).join('') || '<tr><td colspan="7" style="color:#888">문서 없음 — 발표 화면 업로드 또는 아래 수동 추가 사용</td></tr>';
   const stBadge = s => s === 'acquired' ? '<span class="pill" style="background:#2f8a4c">습득됨</span>'
     : s === 'dismissed' ? '<span class="pill" style="background:#3a3a44">제외</span>'
     : '<span class="pill" style="background:#8a6a20">대기</span>';
@@ -647,8 +652,37 @@ function knowledgePanel(kuid) {
 <button class="actBtn" type="submit" style="margin-top:6px">＋ 추가·임베딩</button>
 </form>
 <h2 class="sec">지식 리스트 (최근 100건)</h2>
-<table><thead><tr><th>문서</th><th>출처</th><th>신뢰도</th><th>조정</th><th>등록</th><th></th></tr></thead><tbody>${docRows}</tbody></table>
+<form id="knowBulkForm" method="post" action="${PREFIX}/admin/knowledge/delete-many" onsubmit="return knowBulkConfirm()" style="margin:6px 0">
+<button class="actBtn" type="submit" style="background:#8a3030">🗑 선택 삭제</button>
+<small style="color:#767b86;margin-left:8px">체크한 문서를 일괄 삭제합니다. 자동 습득(🧠) 건은 해당 질문이 재습득 대상에서 제외됩니다.</small>
+</form>
+<table><thead><tr><th style="width:30px"><input type="checkbox" id="knowSelAll" onclick="knowSelAllChk(this)" title="전체 선택" style="vertical-align:middle"></th><th>문서</th><th>출처</th><th>신뢰도</th><th>조정</th><th>등록</th><th></th></tr></thead><tbody>${docRows}</tbody></table>
+<script>
+function knowSelAllChk(cb){document.querySelectorAll('input.knowChk').forEach(c=>c.checked=cb.checked)}
+function knowBulkConfirm(){const c=document.querySelectorAll('input.knowChk:checked');if(!c.length){alert('삭제할 문서를 먼저 체크하세요.');return false}const a=[...c].filter(x=>x.dataset.auto==='1').length;return confirm('선택한 '+c.length+'개 문서를 삭제할까요?'+(a?' (자동 습득 '+a+'건 포함 — 해당 질문은 재습득 대상에서 제외됩니다.)':''))}
+</script>
 </div>`;
+}
+
+// [2026-10-05, 사용자 요청] 지식 내용 열람·수정 — 실시간 자동 습득 지식을 관리자가 검수·수정하면
+// 전문을 재청크·재임베딩한다. 수정본은 관리자 검수로 보고 신뢰도 높음(1.0)을 적용하며, 자동 문서의
+// 이름 변경 시 원질문을 재습득 금지로 기록해 폐루프(재습득) 의미규칙을 유지한다.
+function knowledgeEditPage(doc, content, notice, err) {
+  const auto = (doc.origin || 'manual') === 'auto';
+  return adminShell('knowledge', `<div class="box wide">
+<h1>✏️ 지식 수정 — 문서#${doc.id} <span class="pill" style="background:${auto ? '#2b5fd9' : '#3a3a44'}">${auto ? '🧠 자동 습득' : '📎 수동'}</span></h1>
+${notice ? `<div class="msg ok">${esc(notice)}</div>` : ''}${err ? `<div class="msg ok" style="background:#5c2525">${esc(err)}</div>` : ''}
+<p style="color:#9a9ea8;font-size:.8rem">${auto ? '발표 중 답하지 못한 질문(rag-miss)으로 클라우드에서 자동 습득된 문서입니다. 내용을 검토·수정한 뒤 저장하면 <b>전체 재임베딩</b>과 신뢰도 <b>높음(1.0)</b>이 적용됩니다. 이름을 바꾸면 원래 질문은 재습득 금지로 기록됩니다(수정한 지식이 같은 질문으로 덮이지 않음).' : '저장하면 전체 재임베딩과 신뢰도 높음(1.0)이 적용됩니다.'}</p>
+<form method="post" action="${PREFIX}/admin/knowledge/update">
+<input type="hidden" name="id" value="${doc.id}">
+<label style="display:block;font-size:.78rem;color:#9a9ea8;margin:8px 0 4px">이름</label>
+<input name="name" value="${esc(doc.name)}" required style="width:460px;max-width:100%;padding:6px 8px;font-size:.8rem;background:#0d0f13;border:1px solid #2a2e38;border-radius:6px;color:#e8e8ea">
+<label style="display:block;font-size:.78rem;color:#9a9ea8;margin:12px 0 4px">내용 — 전문을 자유롭게 편집하세요. 저장 시 다시 청크·임베딩됩니다.</label>
+<textarea name="text" required rows="16" style="display:block;width:100%;box-sizing:border-box;padding:8px;font-size:.8rem;line-height:1.55;background:#0d0f13;border:1px solid #2a2e38;border-radius:6px;color:#e8e8ea">${esc(content)}</textarea>
+<div style="margin-top:10px"><button class="actBtn" type="submit" style="background:#2b5fd9">💾 저장·재임베딩</button>
+<a href="${PREFIX}/admin#knowledge" style="margin-left:12px;color:#9a9ea8;font-size:.8rem">취소 — 지식 관리로</a></div>
+</form>
+</div>`);
 }
 // [2026-10-05] 🧭 Decision Router 탭 (지시서 §26) — 결정 레이어의 모드·라우트 분포·KPI·임계값·
 // 최근 판단. 지표는 decision_log.jsonl 꼬리에서 실시간 산출, 옵티마이저 결과는 decision_status.json.
@@ -846,7 +880,7 @@ app.get(`${PREFIX}/logout`, (req, res) => {
 });
 
 app.get(`${PREFIX}/admin`, requireAdmin, (req, res) => {
-  const t = ['dash', 'users', 'loop', 'anno', 'docs', 'tools'].includes(req.query.tab) ? req.query.tab : 'dash';
+  const t = ['dash', 'users', 'loop', 'anno', 'docs', 'tools', 'knowledge', 'decision'].includes(req.query.tab) ? req.query.tab : 'dash';
   res.send(adminPage(undefined, t));
 });
 app.post(`${PREFIX}/admin/approve`, requireAdmin, (req, res) => {
@@ -1253,6 +1287,72 @@ app.post(`${PREFIX}/admin/knowledge/add`, requireAdmin, async (req, res) => {
   }
   knowLedger({ ts: new Date().toISOString(), user: req.user.username, q: name, docId, confidence: conf, uncertain: false, chars: text.length, ms: 0, source: 'manual' });
   res.send(adminPage(`"${name}" 추가 완료 — ${seq}청크 임베딩, 신뢰도 ${conf}.`, 'knowledge', { knowUid: req.user.id }));
+});
+// [2026-10-05, 사용자 요청] 지식 내용 수정 — 습득 전문을 열람·편집해 저장하면 재청크·재임베딩.
+// 임베딩을 모두 성공한 뒤 트랜잭션으로 치환하므로 임베딩 실패 시 기존 청크가 그대로 보존된다.
+app.get(`${PREFIX}/admin/knowledge/:id/edit`, requireAdmin, (req, res) => {
+  const doc = db.prepare('SELECT * FROM documents WHERE id=? AND user_id=?').get(Number(req.params.id), req.user.id);
+  if (!doc) return res.redirect(`${PREFIX}/admin`);
+  let content = '';
+  try { content = db.prepare('SELECT text FROM chunks WHERE document_id=? ORDER BY seq').all(doc.id).map(c => c.text).join('\n'); } catch { /* 청크 없음 */ }
+  res.send(knowledgeEditPage(doc, content));
+});
+app.post(`${PREFIX}/admin/knowledge/update`, requireAdmin, async (req, res) => {
+  const id = Number(req.body.id);
+  const doc = db.prepare('SELECT * FROM documents WHERE id=? AND user_id=?').get(id, req.user.id);
+  if (!doc) return res.send(adminPage('수정할 문서를 찾을 수 없습니다.', 'knowledge', { knowUid: req.user.id }));
+  let content = '';
+  try { content = db.prepare('SELECT text FROM chunks WHERE document_id=? ORDER BY seq').all(doc.id).map(c => c.text).join('\n'); } catch { /* 청크 없음 */ }
+  const name = String(req.body.name || '').trim() || doc.name;
+  const text = String(req.body.text || '').trim();
+  if (!text) return res.send(knowledgeEditPage(doc, content, null, '내용이 비어 있습니다. 지식을 없애려면 목록의 삭제를 사용하세요.'));
+  // 1) 재임베딩 선완료 — 전부 성공해야 치환 진행(중간 실패 시 기존 청크 보존)
+  const fresh = [];
+  try {
+    for (const t of chunkText(text)) { const emb = await embedViaN8n(t); if (emb) fresh.push([t, emb]); }
+  } catch { /* fresh 비어 아래 분기에서 안내 */ }
+  if (!fresh.length) return res.send(knowledgeEditPage(doc, content, null, '임베딩 실패 — 기존 내용이 유지됐습니다. n8n 게이트웨이 상태를 확인한 뒤 다시 시도하세요.'));
+  db.transaction(() => {
+    db.prepare('UPDATE documents SET name=?, source_bytes=?, confidence=? WHERE id=?').run(name, Buffer.byteLength(text, 'utf8'), CONF_MANUAL, id);
+    db.prepare('DELETE FROM chunks WHERE document_id=?').run(id);
+    const ins = db.prepare('INSERT INTO chunks(document_id,user_id,seq,text,embedding,char_count) VALUES(?,?,?,?,?,?)');
+    fresh.forEach(([t, emb], i) => ins.run(id, doc.user_id, i, t, embToBuf(emb), t.length));
+  })();
+  // 2) 자동 문서의 이름 변경 = 원질문과의 연결 해제 — 같은 질문이 재습득되지 않도록 금지 기록
+  if ((doc.origin || 'manual') === 'auto') {
+    const oldQ = doc.name.startsWith('자동학습: ') ? doc.name.slice('자동학습: '.length) : doc.name;
+    const newQ = name.startsWith('자동학습: ') ? name.slice('자동학습: '.length) : name;
+    if (normQ(oldQ) !== normQ(newQ)) {
+      try { fs.appendFileSync(KNOW_DISMISS, JSON.stringify({ ts: new Date().toISOString(), q: normQ(oldQ), docId: id, by: 'rename' }) + '\n'); } catch (_) {}
+    }
+  }
+  knowLedger({ ts: new Date().toISOString(), user: req.user.username, q: name, docId: id, confidence: CONF_MANUAL, uncertain: false, chars: text.length, ms: 0, source: 'admin-edit' });
+  console.log(`[지식 수정] 문서#${id} "${name}" — 재임베딩 ${fresh.length}청크, 신뢰도 1.0 (by ${req.user.username})`);
+  res.send(adminPage(`문서#${id} "${name}" 수정 완료 — ${fresh.length}청크 재임베딩, 신뢰도 높음(1.0) 적용.`, 'knowledge', { knowUid: req.user.id }));
+});
+// 일괄 삭제 — 리스트 체크박스(ids[]) 전용. 단건 삭제와 같은 의미규칙: 자동 문서는 해당 질문 재습득 금지 기록.
+app.post(`${PREFIX}/admin/knowledge/delete-many`, requireAdmin, (req, res) => {
+  let ids = req.body.ids;
+  if (!Array.isArray(ids)) ids = ids ? [ids] : [];
+  ids = [...new Set(ids.map(Number).filter(n => Number.isInteger(n) && n > 0))].slice(0, 200);
+  if (!ids.length) return res.send(adminPage('선택된 문서가 없습니다 — 체크 후 삭제하세요.', 'knowledge', { knowUid: req.user.id }));
+  let n = 0, autoN = 0;
+  const get = db.prepare('SELECT id,name,origin FROM documents WHERE id=? AND user_id=?');
+  db.transaction(() => {
+    for (const id of ids) {
+      const d = get.get(id, req.user.id);
+      if (!d) continue;
+      db.prepare('DELETE FROM documents WHERE id=?').run(id); // chunks FK CASCADE
+      n++;
+      if ((d.origin || 'manual') === 'auto') {
+        autoN++;
+        const q = d.name.startsWith('자동학습: ') ? d.name.slice('자동학습: '.length) : d.name;
+        try { fs.appendFileSync(KNOW_DISMISS, JSON.stringify({ ts: new Date().toISOString(), q, docId: d.id, by: 'bulk-delete' }) + '\n'); } catch (_) {}
+      }
+    }
+  })();
+  console.log(`[지식 일괄삭제] ${n}건(자동 ${autoN}) by ${req.user.username}`);
+  res.send(adminPage(`${n}개 문서 삭제 완료${autoN ? ` — 자동 습득 ${autoN}건의 질문은 재습득 대상에서 제외됩니다.` : ''}`, 'knowledge', { knowUid: req.user.id }));
 });
 
 // ── Jev QA Router 결정 레이어 [2026-10-05, 지시서 적용] ─────────────────────
