@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- [2026-10-05] Jev QA Router 임계값 옵티마이저 주기 실행 (30분).
+     로드(사용자 승인 후): launchctl load ~/Library/LaunchAgents/com.wizbase.ptagent.decision-opt.plist
+     수동 실행도 가능: python3 /Users/wizbase/works/pt-agent/decision/decision_optimizer.py -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.wizbase.ptagent.decision-opt</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/wizbase/works/pt-agent/decision/decision_optimizer.py</string>
+  </array>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>StandardOutPath</key><string>/tmp/ptagent-decision-opt.log</string>
+  <key>StandardErrorPath</key><string>/tmp/ptagent-decision-opt.log</string>
+</dict>
+</plist>

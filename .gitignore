@@ -3,3 +3,9 @@ data/
 *.log
 .env
 ppt-agent-rag/
+__pycache__/
+.DS_Store
+voice-samples/
+*.png
+eval/
+integrity/

@@ -42,11 +42,13 @@ body{margin:0;font-family:'Pretendard Variable',Pretendard,-apple-system,'Segoe 
 
 /* 메인 레이아웃 */
 .main{display:flex;height:calc(100vh - 52px);height:calc(100dvh - 52px);position:relative}
+/* [2026-10-05] 전체화면 — topBar 숨김 공간(52px)을 슬라이드에 돌려줌. enterFS에서 body.fs 부여 */
+body.fs .main{height:100vh;height:100dvh}
 
 /* 슬라이드 영역 */
 .slideWrap{flex:1;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 30%,var(--bg2) 0%,var(--bg) 70%);position:relative;overflow:hidden;transition:margin .35s var(--ease)}
 .slideWrap.panelOpen{margin-right:var(--panelW)}
-.slideContent{width:100%;height:100%;padding:48px 64px 96px;overflow-y:auto;animation:fadeIn .4s var(--ease)}
+.slideContent{width:100%;height:100%;padding:14px 40px 72px;overflow-y:auto;animation:fadeIn .4s var(--ease)} /* [2026-10-05] 상단 48→14px — 슬라이드 최대 표시 */
 .slideContent h2{font-size:clamp(1.4rem,4vw,2rem);margin:0 0 28px;color:#fff;font-weight:800;letter-spacing:-.03em;line-height:1.3;padding-bottom:16px;position:relative}
 .slideContent h2::after{content:'';position:absolute;bottom:0;left:0;width:48px;height:3px;background:linear-gradient(90deg,var(--pri),var(--pri2));border-radius:2px}
 .slideContent ul{line-height:2.1;font-size:clamp(.92rem,2vw,1.1rem);color:var(--txt2);padding-left:20px;margin:0;list-style:none}
@@ -54,15 +56,27 @@ body{margin:0;font-family:'Pretendard Variable',Pretendard,-apple-system,'Segoe 
 .slideContent li::before{content:'';position:absolute;left:0;top:calc(1em - 2px);width:6px;height:6px;border-radius:50%;background:var(--pri);opacity:.6}
 .slideContent img{max-width:88%;border-radius:var(--r-m);margin:16px auto;display:block;box-shadow:var(--shadow-m);border:1px solid var(--line)}
 .slideContent .note{background:var(--pri-bg);border:1px solid var(--pri-bd);border-radius:var(--r-m);padding:14px 18px;margin-top:24px;color:var(--mut);font-size:.82rem;line-height:1.6}
-.slideCanvas{position:relative;width:100%;margin:0 auto;overflow:hidden}
+.slideContent.canvasMode{display:grid;place-items:start center;overflow:hidden;padding:0}  /* [2026-10-04 v9] 캔버스 fit 모드. [2026-10-05] 여백 완전 제거+상단 정렬 — 위 여백 0, 남는 공간은 전부 아래로 */
+.slideCanvas{position:relative;margin:0 auto;overflow:hidden;container-type:size;transform-origin:center;will-change:transform}  /* [2026-10-04 v9] 크기는 renderSlide가 계산, cqh 폰트 스케일용 컨테이너. transform-origin — 슬라이드 자체 줌(휠)용 */
+/* [2026-10-05] 슬라이드 줌 상태 칩 — 좌하단, 100%가 아니면 표시. 클릭=리셋 */
+#zoomChip{position:absolute;left:18px;bottom:18px;z-index:10;display:none;padding:7px 14px;border-radius:999px;border:1px solid var(--line);background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:var(--blur);color:var(--txt2);font-size:.8rem;font-weight:700;cursor:pointer}
+#zoomChip:hover{color:var(--txt);border-color:var(--line2)}
 .slideShapeImg,.slideShapeTitle,.slideShapeText{position:absolute}
 .slideShapeImg{object-fit:contain}
+/* [2026-10-05 핵심 수정] 폴백 모드용 .slideContent img 규칙(max-width:88%·둥근모서리·테두리·그림자)이
+캔버스 모드 슬라이드 이미지에 새어 들어가 이미지가 캔버스의 88%만 채웠다 — 우측에 정확히 12% 여백과
+둥근 모서리가 생기던 근원(면밀 추적 끝에 확인). 캔버스 모드에선 항상 캔버스 전체를 채운다. */
+.slideContent.canvasMode .slideShapeImg{max-width:100%;max-height:100%;margin:0;border-radius:0;box-shadow:none;border:none}
+/* [2026-10-05] 꽉 채움 모드 — 이미지를 화면에 꽉 채우고 넘치는 부분은 잘라냄(여백 0). ctrlBar 🖼 버튼 토글 */
+.slideContent.coverMode .slideShapeImg{object-fit:cover}
 .slideShapeTitle{color:#fff;font-weight:800;letter-spacing:-.03em;line-height:1.25;overflow:hidden}
 .slideShapeText{color:var(--txt2);line-height:1.5;white-space:pre-wrap;overflow:hidden}
 
 /* 우측 패널 */
-.sidePanel{position:absolute;right:0;top:0;bottom:0;width:var(--panelW);background:var(--surface);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .35s var(--ease);display:flex;flex-direction:column;z-index:5;box-shadow:var(--shadow-l)}
-.sidePanel.open{transform:translateX(0)}
+/* [2026-10-04 v9.3] 닫힌 패널의 box-shadow가 화면 안에 남아 오른쪽에 어두운 "프레임"처럼 보이는
+   문제(사용자 보고) — 닫힘 상태에선 visibility로 그림자까지 통째로 숨김. 열림 애니메이션은 유지. */
+.sidePanel{position:absolute;right:0;top:0;bottom:0;width:var(--panelW);background:var(--surface);border-left:1px solid var(--line);transform:translateX(100%);visibility:hidden;transition:transform .35s var(--ease),visibility .35s;display:flex;flex-direction:column;z-index:5}
+.sidePanel.open{transform:translateX(0);visibility:visible;box-shadow:var(--shadow-l)}
 .pHead{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;font-size:.8rem;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
 .scriptBox{flex:1;padding:16px;overflow-y:auto;font-size:.8rem;line-height:1.7;color:var(--txt2);white-space:pre-wrap;border-bottom:1px solid var(--line)}
 .qaBox{margin:10px 14px;padding:12px 16px;background:var(--warn-bg);border:1px solid rgba(251,191,36,.2);border-radius:var(--r-m);font-size:.76rem;line-height:1.6;color:var(--warn);display:none;max-height:160px;overflow-y:auto}
@@ -79,6 +93,40 @@ body{margin:0;font-family:'Pretendard Variable',Pretendard,-apple-system,'Segoe 
 .ctrBtn:hover{border-color:var(--line2);background:var(--surface2);color:var(--txt);box-shadow:var(--shadow-s)}
 .ctrBtn:active{transform:scale(.96)}
 .ctrBtn.play{background:linear-gradient(135deg,var(--pri),#7c3aed);border:none;color:#fff;min-width:80px;box-shadow:0 4px 16px rgba(99,102,241,.35);font-weight:700}
+
+/* ── 발표 중 주석 (색연필·메모) [2026-10-04, 사용자 요청] ── */
+#annoCanvas{position:absolute;z-index:6;pointer-events:none;cursor:crosshair;touch-action:none}
+#annoCanvas.on{pointer-events:auto}
+/* [2026-10-05] 발표 중 핸들러 — 화면 최우측 끝 세로 레일(발표 화면 중앙을 가리지 않게).
+접으면 반투명 🖍️ 핸들만 우측 끝에 남고 도구는 전부 숨김. 접힘 상태는 localStorage 기억. */
+.annoBar{position:absolute;right:8px;top:50%;transform:translateY(-50%);z-index:9;display:none;flex-direction:column;align-items:center;gap:6px;background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:var(--blur);border:1px solid var(--line);border-radius:14px;padding:7px 6px;box-shadow:var(--shadow-m);transition:background .2s,border-color .2s,padding .2s,opacity .45s}
+.annoBar.show{display:flex}
+.annoBar.folded{background:transparent;border-color:transparent;box-shadow:none;backdrop-filter:none;padding:3px}
+/* [2026-10-05] 발표 중 마우스 정지 — 접힌 핸들도 컨트롤바와 함께 사라져 우측 끝이 완전히 비침 없이 클린 */
+.annoBar.dimOut{opacity:0;pointer-events:none}
+.annoBar.folded:hover{background:color-mix(in srgb,var(--surface) 70%,transparent);border-color:var(--line)}
+.annoBar.folded .annoTool{display:none}
+.annoBar .aBtn{border:1px solid var(--line);background:var(--surface2);color:var(--txt2);border-radius:8px;padding:4px 8px;font-size:.76rem;cursor:pointer;min-width:30px}
+.annoBar .aBtn:hover{color:var(--txt);border-color:var(--line2)}
+.annoBar .aBtn.on{border-color:var(--pri);color:var(--pri);background:var(--pri-bg);font-weight:700}
+#annoFold{opacity:.55;font-size:.8rem;line-height:1.2}
+.annoBar:not(.folded) #annoFold{opacity:.9}
+.annoBar .dot{width:18px;height:18px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0}
+.annoBar .dot.on{border-color:var(--txt);transform:scale(1.15)}
+#noteBox{position:absolute;left:16px;bottom:64px;z-index:7;width:min(380px,44vw);max-height:34vh;display:none;flex-direction:column;background:rgba(10,12,18,.88);backdrop-filter:blur(8px);border:1px solid var(--line2);border-radius:12px;overflow:hidden}
+#noteBox.show{display:flex}
+#noteHead{padding:8px 12px;font-size:.72rem;font-weight:700;color:#9fb6e8;border-bottom:1px solid rgba(255,255,255,.09);display:flex;justify-content:space-between;align-items:center}
+#noteText{padding:10px 12px;overflow-y:auto;font-size:.76rem;line-height:1.7;color:#d7dbe4;white-space:pre-wrap;user-select:text;cursor:text}
+#noteText mark{background:rgba(255,214,10,.32);color:#ffe27a;border-bottom:2px dotted #ffd60a;padding:0 1px;border-radius:3px}
+.annoModalBg{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center}
+.annoModalBg.show{display:flex}
+.annoCard{width:min(440px,92vw);background:var(--surface);border:1px solid var(--line2);border-radius:14px;padding:18px;box-shadow:var(--shadow-l)}
+.annoCard h3{margin:0 0 10px;font-size:.95rem}
+.annoCard select,.annoCard textarea{width:100%;box-sizing:border-box;background:var(--surface2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:.82rem;margin:4px 0 10px;font-family:inherit}
+.annoCard textarea{resize:vertical;min-height:64px}
+.annoCard .lbl{font-size:.74rem;color:var(--mut);font-weight:700}
+.annoCard .rowBtn{display:flex;gap:8px;justify-content:flex-end}
+.sldBadge{display:inline-block;min-width:16px;height:16px;line-height:16px;text-align:center;border-radius:99px;background:var(--pri);color:#fff;font-size:.62rem;font-weight:700;margin-left:auto}
 .ctrBtn.play:hover{box-shadow:0 6px 24px rgba(99,102,241,.5);transform:translateY(-1px)}
 .prog{flex:1;height:5px;background:var(--line);border-radius:3px;overflow:hidden;position:relative}
 .progBar{height:100%;background:linear-gradient(90deg,var(--pri),var(--pri2));border-radius:3px;transition:width .4s var(--ease)}
@@ -136,7 +184,7 @@ body{margin:0;font-family:'Pretendard Variable',Pretendard,-apple-system,'Segoe 
   .sidePanel{width:100%}
   .slideWrap.panelOpen{margin-right:0}
   .modalCard{min-width:auto;width:calc(100vw - 32px);padding:20px;max-height:88vh;overflow-y:auto}
-  .slideContent{padding:24px 18px 96px}
+  .slideContent{padding:12px 14px 84px}
   .ctrlBar{padding:10px 10px 6px;gap:6px}
   .ctrBtn{padding:9px 10px;font-size:.78rem}
   .status{display:none}
@@ -181,6 +229,23 @@ body{margin:0;font-family:'Pretendard Variable',Pretendard,-apple-system,'Segoe 
   </div>
   <div class="slideWrap" id="slideWrap">
     <div class="slideContent" id="slideContent"></div>
+    <!-- [2026-10-04, 사용자 요청] 발표 중 주석 — 슬라이드 색연필 오버레이 + 스피커노트 박스 + 툴바 -->
+    <canvas id="annoCanvas"></canvas>
+    <!-- [2026-10-05] 슬라이드 줌 상태 칩 — 100% 초과 시 표시, 클릭=리셋 -->
+    <div id="zoomChip" title="슬라이드 확대/축소 리셋 (더블클릭 또는 0)" onclick="resetSlideZoom()">100%</div>
+    <div class="annoBar folded" id="annoBar">
+      <button class="aBtn" id="annoFold" title="주석 도구 펼치기">🖍️</button>
+      <button class="aBtn annoTool" id="annoToggle" title="색연필 모드 (슬라이드에 그리기)">🖍️</button>
+      <button class="dot annoTool on" data-c="#ff3b30" style="background:#ff3b30" title="빨강"></button>
+      <button class="dot annoTool" data-c="#2b5fd9" style="background:#2b5fd9" title="파랑"></button>
+      <button class="dot annoTool" data-c="#ffd60a" style="background:#ffd60a" title="노랑"></button>
+      <button class="dot annoTool" data-c="#30d158" style="background:#30d158" title="초록"></button>
+      <button class="aBtn annoTool" id="annoUndo" title="마지막 획 되돌리기">↶</button>
+      <button class="aBtn annoTool" id="annoClear" title="이 슬라이드 그림 지우기">🗑</button>
+      <button class="aBtn annoTool" id="annoMemoBtn" title="이 슬라이드에 메모 남기기">📝</button>
+      <button class="aBtn annoTool" id="annoNoteBtn" title="스피커노트 보기 (글자 선택 후 메모)">📜</button>
+    </div>
+    <div id="noteBox"><div id="noteHead"><span id="noteTitle">📜 스피커노트</span><button class="aBtn" id="noteClose" style="padding:2px 8px">✕</button></div><div id="noteText"></div></div>
     <div class="ticker" id="ticker" style="display:none">
       <span class="ticker-text" id="tickerText"></span>
       <div class="search-indicator" id="searchIndicator">
@@ -193,15 +258,38 @@ body{margin:0;font-family:'Pretendard Variable',Pretendard,-apple-system,'Segoe 
       <button class="ctrBtn play" id="btnPlay">▶ 발표</button>
       <button class="ctrBtn" id="btnNext">⏭</button>
       <button class="ctrBtn" id="btnStop">⏹</button>
+      <button class="ctrBtn" id="btnFit" title="슬라이드 화면 채움 방식 전환">🖼 맞춤</button>
       <div class="prog"><div class="progBar" id="progBar" style="width:0%"></div></div>
       <div class="sldNum" id="sldNum">– / –</div>
-      <div class="status" id="status">대기 중</div>
+      <div class="status" id="status"><span id="statusMsg">대기 중</span> · <b id="verBadge" title="진단 로그는 원격 수집됩니다 (화면 콘솔은 ?dbg=1)">v9</b></div>
+<div id="dbgBox" style="position:fixed;left:8px;bottom:8px;background:#000c;color:#9f9;padding:6px 9px;font:10px/1.45 ui-monospace,Menlo,monospace;max-width:75vw;max-height:40vh;overflow:hidden;z-index:99999;white-space:pre-wrap;pointer-events:none;border-radius:6px;display:none"></div>
     </div>
   </div>
   <div class="sidePanel" id="sidePanel">
     <div class="pHead"><span>발표 정보</span><button class="iconBtn" onclick="togglePanel()" style="width:28px;height:28px;font-size:.8rem">✕</button></div>
     <div class="qaBox" id="qaBox"></div>
     <div class="slideList" id="slideList"></div>
+  </div>
+</div>
+<!-- [2026-10-04] 발표 메모 모달 — 슬라이드/스피커노트/음성오류 기록 -->
+<div class="annoModalBg" id="annoModalBg">
+  <div class="annoCard">
+    <h3>📝 메모 — 슬라이드 <span id="annoSlideNum">?</span></h3>
+    <span class="lbl">분류</span>
+    <select id="annoCat">
+      <option value="슬라이드 수정">🖍️ 슬라이드 수정</option>
+      <option value="스피커노트 수정">📜 스피커노트 수정</option>
+      <option value="음성 오류">🎙️ 음성 에이전트 오류</option>
+      <option value="기타">📌 기타</option>
+    </select>
+    <span class="lbl" id="annoQuoteLbl" style="display:none">선택한 노트 구절</span>
+    <div id="annoQuote" style="display:none;background:var(--pri-bg);border-left:3px solid var(--pri);border-radius:6px;padding:8px 10px;font-size:.78rem;color:var(--pri);margin:4px 0 10px;max-height:72px;overflow-y:auto"></div>
+    <span class="lbl">메모</span>
+    <textarea id="annoText" placeholder="수정할 부분이나 오류 내용을 적어주세요"></textarea>
+    <div class="rowBtn">
+      <button class="ctrBtn" id="annoCancel">취소</button>
+      <button class="ctrBtn play" id="annoSave" style="min-width:70px">저장</button>
+    </div>
   </div>
 </div>
 <div class="modal" id="settingsModal">
@@ -221,10 +309,17 @@ body{margin:0;font-family:'Pretendard Variable',Pretendard,-apple-system,'Segoe 
       <button class="setBtn" id="vOnyx" onclick="setVoice('onyx')" title="남성, 깊은 저음">Onyx</button>
       <button class="setBtn on" id="vNova" onclick="setVoice('nova')" title="여성, 밝고 또렷함">Nova</button>
       <button class="setBtn" id="vShimmer" onclick="setVoice('shimmer')" title="여성, 부드럽고 따뜻함">Shimmer</button></div>
-    <div class="setRow" id="voiceRowLocal" style="display:none"><span class="setLbl">로컬 보이스</span>
-      <button class="setBtn on" id="vEric" onclick="setVoice('eric')">Eric</button>
-      <button class="setBtn" id="vDylan" onclick="setVoice('dylan')">Dylan</button>
-      <button class="setBtn" id="vSohee" onclick="setVoice('sohee')">Sohee(여)</button></div>
+    <div class="setRow" id="voiceRowLocal" style="display:none;flex-wrap:wrap"><span class="setLbl">로컬 보이스</span>
+      <button class="setBtn on" id="vDylan" onclick="setVoice('dylan')" title="남성, 또렷함">Dylan</button>
+      <button class="setBtn" id="vUncleFu" onclick="setVoice('uncle_fu')" title="남성, 낮고 묵직함">Uncle Fu</button>
+      <button class="setBtn" id="vSohee" onclick="setVoice('sohee')" title="여성, 부드러움">Sohee</button>
+      <button class="setBtn" id="vSerena" onclick="setVoice('serena')" title="여성, 또렷함">Serena</button>
+      <button class="setBtn" id="vVivian" onclick="setVoice('vivian')" title="여성, 밝음">Vivian</button></div>
+    <!-- [2026-10-04] 발표 중 음성 명령(Q&A·배경대화 감지) 토글 — 기본 끔.
+         켜면 발표 중 말하면 멈춰서 질문을 받고, 6초 침묵 후 이어서 진행. 끄면 끊김 없이 끝까지 재생. -->
+    <div class="setRow"><span class="setLbl">🎤 발표 중 음성 명령</span>
+      <button class="setBtn" id="micCmdOn" onclick="setMicCmd(true)" title="발표 중 말하면 멈추고 질문에 답합니다">켬 (질의응답)</button>
+      <button class="setBtn on" id="micCmdOff" onclick="setMicCmd(false)" title="마이크를 끄고 끊김 없이 끝까지 재생">끔 (끊김 없음)</button></div>
     <div class="setRow"><span class="setLbl">🗣️ 발표 속도</span>
       <input type="range" id="speedSlider" min="0.8" max="2" step="0.05" oninput="setTtsSpeed(this.value)" style="flex:1;accent-color:var(--pri)"/>
       <span id="speedVal" style="min-width:44px;text-align:right;font-size:.78rem;color:var(--txt2);font-weight:700"></span></div>
@@ -255,7 +350,25 @@ body{margin:0;font-family:'Pretendard Variable',Pretendard,-apple-system,'Segoe 
 const LOCAL_LLM='/ppt-agent/api/llm';
 const OPENAI_SCRIPT='/ppt-agent/api/script';
 const TTS_URL='https://bc.wizbase.ai.kr/tts-api/v1/audio/speech';
-let scriptEngine='openai',ttsVoice='nova',ttsEngine='openai',ragEnabled=true;
+// [2026-10-04] 엔진/목소리를 localStorage에 저장·복원 — 재접속해도 마지막 설정 유지
+let scriptEngine='openai',ragEnabled=true;
+let ttsVoice='nova',ttsEngine='openai';
+let micCmdEnabled=false;  // 발표 중 음성 명령(Q&A·배경대화 감지) — 기본 끔(끊김 없는 예측 가능한 재생)
+try{const sv=localStorage.getItem('ppt_agent_voice');if(sv)ttsVoice=sv}catch(e){}
+try{const se=localStorage.getItem('ppt_agent_tts_engine');if(se==='local'||se==='openai')ttsEngine=se}catch(e){}
+// [2026-10-05 v9] 오래 열어둔 탭의 엔진 드리프트 방지 — 탭을 다시 보이게 하면 localStorage의 최신
+// 엔진·음성 설정을 메모리로 흡수한다. 실측(10:40 KST): openai 탭이 살아 있는 동안 설정을 local로
+// 바꿔도 낡은 탭이 계속 OpenAI 음성(영어 발음·다른 화자)을 내뱉어 "가끔 다른 목소리"가 섞였다.
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden)return;
+  try{
+    const se=localStorage.getItem('ppt_agent_tts_engine');
+    if((se==='local'||se==='openai')&&se!==ttsEngine){ttsEngine=se;invalidateVoiceCaches();dbg('⚙ 엔진 설정 동기화('+se+') — 다른 탭에서 변경된 설정 흡수, 캐시 무효화')}
+    const sv=localStorage.getItem('ppt_agent_voice');
+    if(sv&&sv!==ttsVoice){ttsVoice=sv;invalidateVoiceCaches();dbg('⚙ 음성 설정 동기화('+sv+') — 캐시 무효화')}  // [2026-10-05 v9e] 동기화로 바뀐 보이스인데 캐시를 안 비우면 promptCache·_audioCache의 옛 보이스 음성이 그대로 재생됐다(다른 목소리 혼입의 잔여 구멍)
+  }catch(e){}
+});
+try{micCmdEnabled=localStorage.getItem('ppt_agent_mic_cmd')==='1'}catch(e){}
 let ttsSpeed=(()=>{try{const s=parseFloat(localStorage.getItem('ppt_agent_speed'));return s>=0.8&&s<=2?s:1.38}catch(e){return 1.38}})();
 function setTtsSpeed(v){ttsSpeed=+v;document.getElementById('speedVal').textContent=ttsSpeed.toFixed(2)+'x';try{localStorage.setItem('ppt_agent_speed',ttsSpeed)}catch(e){}updateSpeedTotalTime()}
 // [2026-09-29] 발표 속도 슬라이더 옆에 예상 총 발표 시간 표시 — 슬라이드별 실제 스크립트가
@@ -279,8 +392,16 @@ function updateSpeedTotalTime(){
   const sec=Math.round(estimateTotalSeconds());
   el.textContent='⏱️ 예상 총 발표 시간: 약 '+Math.floor(sec/60)+'분 '+String(sec%60).padStart(2,'0')+'초';
 }
-const STYLE='Energetic Korean broadcast announcer. Bright, upbeat, confident. Higher pitch. Crisp articulation. Dynamic delivery like a morning news host.';
+// [2026-10-04] 기존 'Energetic… Higher pitch… Dynamic news host' 지시가 높은 피치+과도한 에너지로
+// "짜증난 듯한/불편한" 목소리를 만들었다(사용자 보고). 차분하고 정중한 발표 톤으로 교체.
+// [2026-10-04 v6] 사용자 평가 "살짝 짜증나고 피곤해 보인다" → 미소·밝음·명료함 방향으로 재조정.
+// 대안 3종을 works/pt-agent/voice-samples/style_*.wav 로 뽑아 두었으니 비교 후 교체 가능.
+// [2026-10-04 v9] 영어 단어/약어 발음 지시 추가 — Qwen3-TTS가 한글 문장 속 영어(RAG, LLM 등)를
+// 중국식 발음으로 읽는 문제. 1순위 한국식 영어 발음 지시(사용자 지정). 부정문("~하지 마라")은
+// 소형 TTS 모델에서 역효과 위험이 있어 긍정형으로만 지시.
+const STYLE='Warm and friendly Korean presenter speaking with a gentle smile. Bright, pleasant and clear voice. Calm, moderate pace. Polite and confident. Read English words and abbreviations with Korean-style English pronunciation, the way a Korean speaker naturally says them. Keep exactly the same warm female voice from the first word to the last of every sentence; never drift to a different speaker or a male voice.';  // [2026-10-05] 화자 고정 지시 추가 — 문장 중간 남성음 스침(화자 드리프트) 완화
 let slides=[],curSlideIdx=-1,sentences=[],curSentenceIdx=0;
+let sentenceGaps=[];  // [2026-10-04 v7] 문장(조각) i 재생 후 휴지 ms — 쉼표 조각 200ms / 문장 끝 700ms
 let playing=false,interrupted=false,audioEl=null,recognizer=null,sttActive=false,ttsSpeaking=false,panelOpen=false;let qaState='idle';
 // [2026-09-29] 브라우저 내장 TTS(speakFB) 폴백이 voice 미지정으로 매번 OS 기본 음성에 맡겨져서,
 // 음성팩 로딩 타이밍/업데이트에 따라 "갑자기 다른(이상한) 목소리"로 튀는 문제 재발 방지 —
@@ -290,9 +411,13 @@ function pickKoreanVoice(){
   if(typeof speechSynthesis==='undefined')return null;
   const voices=speechSynthesis.getVoices();
   if(!voices.length)return null;
-  const v=voices.find(v=>v.lang==='ko-KR')||voices.find(v=>v.lang&&v.lang.startsWith('ko'))||null;
+  // [2026-10-05] lang='ko-KR' 표기만으로는 부족 — 음성팩이 실제로는 중/일어 목소리로 한국어를
+  // 읽어 "외국인 억양"이 되는 실측 사례. 이름에 한국어 표기가 확실한 것을 우선하고, 없으면
+  // ko 계열, 그래도 없으면 null(호출부가 나중에 다시 시도).
+  const v=voices.find(v=>/^ko/i.test(v.lang||'')&&/한국|korean|heami|허미|yuna|유나|sora|siri/i.test(v.name||''))
+        ||voices.find(v=>/^ko/i.test(v.lang||''))||null;
   if(v)console.log('브라우저 TTS 폴백 음성 고정:',v.name,v.lang);
-  else console.warn('한국어 음성을 찾지 못함 — 브라우저 기본값 사용(품질 보장 안 됨)');
+  else console.warn('한국어 음성을 찾지 못함 — 음성 목록 로딩 후 재시도');
   return v;
 }
 if(typeof speechSynthesis!=='undefined'){
@@ -307,7 +432,7 @@ const CONTINUE_SILENCE_MS=6000;  // 6초간 조용해지면 자동 재개
 const RESUME_RE=/계속\s*(발표|진행|해|하세요|해주세요)|발표\s*(계속|이어)|이어서\s*(해|진행|주세요)|다시\s*시작/;
 // [2026-09-29] "계속 발표할까요?"에 대한 가장 흔한 대답("네"/"넵"/"알겠습니다"/"좋아요")은 RESUME_RE의
 // 동사형 구문과 안 맞아 무시되던 문제 — Q&A 확인(confirming 상태)에 이미 쓰던 긍정 판별을 공유.
-const POSITIVE_RE=/네|예|넵|넹|좋아|맞아|응|계속|진행|없|괜찮|고마워|감사|충분|알겠|오케이|ok/i;
+const POSITIVE_RE=/네|예|넵|넹|좋아|맞아|응|계속|진행|없|괜찮|고마워|감사|충분|알겠|오케이|됐|ok/i; // [2026-10-05] 됐(습니다/어요) 추가 — "답이 됐어요"가 재개 응답으로 안 먹던 것 수정
 // ── 슬라이드-음성 동기화 자가 점검 ──
 // renderSlide가 실제로 그린 슬라이드 인덱스와 playSentenceStream이 발화 중인 curSlideIdx가
 // 어긋나면 AI가 스스로 인지하고 "죄송합니다, 해당 페이지로 갈게요" 멘트 후 화면을 복구.
@@ -320,13 +445,28 @@ const SYNC_CORRECTIONS=[
 let _syncCorrIdx=0;
 // 목소리 통일 — 모든 발화를 OpenAI TTS(nova)로, 프리페치 캐시로 침묵 최소화
 let promptCache={};
-const CACHED_PHRASES=['네, 질문해 주세요.','다른 질문 없으시면 계속 발표해도 될까요?','네, 말씀해 주세요.','좋은 질문입니다.','잠시 확인해 보겠습니다.','질문이 없으시면 계속 진행하겠습니다.','더 질문 있으신가요?'];
+const CACHED_PHRASES=['질문해 주세요.','다른 질문 없으시면 계속 발표해도 될까요?','말씀해 주세요.','좋은 질문입니다.','잠시 확인해 보겠습니다.','질문이 없으시면 계속 진행하겠습니다.','더 질문 있으신가요?','질문 있으신가요?','답변 드리겠습니다.','확인해 보겠습니다.','알겠습니다, 잠시만요.','바로 답변 드릴게요.','관련 내용을 찾아보고 있습니다. 잠시만 기다려 주세요.','자료를 확인 중입니다. 조금만 더 기다려 주세요.','문제를 기록했습니다.','계속 발표할까요?','관련 지식이 아직 없습니다.','먼저 발표를 진행하고, 제 에이전트가 관련 지식을 찾아 답변드리겠습니다.','답변은 화면에 표시되어 있습니다.','관련 지식을 찾지 못했습니다. 죄송합니다.','아직 관련 지식을 찾고 있습니다. 찾는 대로 말씀드리겠습니다.'];  // [2026-10-05 v6.1] 지연 답변 통보 2구문(원인+계획 포함 — "무작정 답변 못 한다"고만 하지 않는다). 제안 멘트("조금 전에 질문하신 OOO에 대하여…")는 질문 내용을 담는 동적 문장이라 ready 시점에 개별 프리생성한다  // [2026-10-05 v2] "네," 접두 전부 제거 — 실측으로 "네,"로 시작하면 모델이 "네"에서 조기 EOS(프록시 REJECT→SPLIT→FAIL 8.6~19.8s, FAIL-FINAL로 캐시 영구 미스 → 질문해도 무음). 제거본은 0.5s 일률 1회 성공(15:4x 전수 실측). PLAIN_FILLERS 4종+시간벌기 추임새 2종+일시정지·확인 멘트+문제기록 확인 멘트+배경대화 재개 확인
+// [2026-10-05] RAG 미스 정직 거절 멘트 — 참고자료가 아예 없으면 LLM을 돌리지 않고 이대로 답변한다.
+// 사용자 지시: "로컬 LLM의 한계이므로 RAG에 없는 답변을 못한다는 점을 밝히도록". 약한 참조(스코어
+// 0.3 미만)는 기존대로 [주의] 프롬프트와 함께 LLM 답변을 유지 — 완전 미스만 거절로 전환.
+const RAG_MISS_MSG='죄송합니다. 로컬 데이터베이스에서 해당 질문에 대한 답을 찾지 못했습니다. 로컬 LLM의 한계로, 자료에 없는 내용은 답변드릴 수 없습니다. 답변하지 못한 질문은 기록해 관리자가 자료를 보강하겠습니다.';
+// [2026-10-05 v2] 거절 멘트 2구문으로 분할 — 60자 통짜는 프록시에서 절단 take→SPLIT 스톰(18.6s 실측)을
+// 밟아 발표 중 프리페치가 GPU를 길게 점유한다(질문 답변 지연·화자 이탈의 경합 원인). 짧은 조각은 1회 성공.
+const NO_ANSWER_TOKEN='[[NO_ANSWER]]';  // LLM 센티널 — 근거 없으면 이 토큰만 출력하도록 강제(아래 ctx 주입)
 async function pregenPhrases(){
   console.log('프리페치: 공통 문구',CACHED_PHRASES.length,'개 TTS 생성 중…');
   for(const p of CACHED_PHRASES){
     if(!promptCache[p]){
-      const u=await ttsSentence(p);
+      const u=await enqueueTts(p,null,'prefetch').catch(()=>null);  // [2026-10-04] 직렬 큐 통일 — 기존엔 ttsSentence 직접 호출로 큐를 우회해 동시 요청(runaway/첫 문장 지연)을 유발했음 // [2026-10-05 v2] 'prefetch' 태그 — 새로고침 직후 Q&A가 들어오면 이 선적재 줄도 폐기·중단 대상이 된다(무태그면 21개 문구가 QA 음성 뒤에서도 계속 GPU를 썼음)
       if(u)promptCache[p]=u;
+    }
+  }
+  // [2026-10-05] 실패 문구 2차 패스 — stochastic 조기 EOS(~87% 문서화)로 한 번 실패한 문구를
+  // 그대로 두면 정작 필요한 순간 캐시 미스→텍스트 대체(무음)가 된다. 끝까지 살아남은 것만 재시도.
+  for(const p of CACHED_PHRASES){
+    if(!promptCache[p]){
+      const u=await enqueueTts(p,null,'prefetch').catch(()=>null);
+      if(u)promptCache[p]=u;else dbg('⚠ 프리페치 재시도 실패: '+p.slice(0,16));
     }
   }
   console.log('프리페치 완료:',Object.keys(promptCache).length,'개');
@@ -336,9 +476,18 @@ async function speakUnified(text){
   noteSpoken(text);  // 에코 방지용 기록
   let u=promptCache[text];
   if(u)return playAudio(u);
-  u=await ttsSentence(text);
-  if(u){promptCache[text]=u;return playAudio(u)}
-  return speakFB(text);
+  // [2026-10-05 v7] 음성 통일 — Q&A 멘트는 설정에서 선택한 음성만 사용한다(사용자 지정: 다른
+  // 음성으로라도 내놓을 바엔 화면 텍스트가 낫다). 브라우저 폴백 제거 — 기본음성/한국어 팩 미로딩
+  // 시 이국 억양 목소리가 나오던 원인. 프리캐시 미스 시 설정 음성 생성을 짧게 대기하고, 그 안에
+  // 못 나오면 음성 없이 상태 바 텍스트로 대체. 늦게 완성된 음성은 캐시에 적재해 다음엔 즉시 재생.
+  const _t0=Date.now();
+  const gen=enqueueTts(text,true).then(v=>{if(v){promptCache[text]=v;return v}return null}).catch(()=>null);
+  u=await Promise.race([gen,new Promise(r=>setTimeout(()=>r(null),QA_TTS_WAIT_MS))]);
+  qaLog('unified_tts',{phrase:text.slice(0,40),wait_ms:Date.now()-_t0,ok:!!u});
+  if(u)return playAudio(u);
+  dbg('⚠ 설정 음성 생성 지연 — 텍스트 대체: '+text.slice(0,20));
+  setStatus('💬 '+text);
+  return;
 }
 // ── RAG/PPT 저장소 — 예전엔 브라우저 IndexedDB(유저 구분 없음)였는데, 이제 로그인 서버가
 // 유저별로 분리해서 SQLite에 들고 있고 임베딩/검색도 서버가 처리한다(비밀 키도 서버만 앎).
@@ -383,6 +532,7 @@ function updateRefDocList(){
       '<div style="display:flex;align-items:center;gap:6px">'+
         '<button class="iconBtn" style="width:22px;height:22px;font-size:.72rem;color:'+(d.isPrimary?'var(--ok)':'var(--mut2)')+'" title="'+(d.isPrimary?'주로 참고 해제':'PPT가 주로 참고할 문서로 지정')+'" onclick="toggleDocPrimary('+i+')">'+(d.isPrimary?'⭐':'☆')+'</button>'+
         '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem;color:var(--txt)">'+esc(d.name)+'</span>'+
+        (d.origin==='auto'?'<span style="color:#7aa5f7;font-size:.68rem" title="질의응답에서 자동 습득된 지식 — 관리 콘솔에서 신뢰도 조정">🧠'+((d.confidence??1)<0.45?'낮음':(d.confidence??1)<0.8?'보통':'높음')+'</span>':'')+
         '<span style="color:var(--ok);font-size:.68rem">'+d.chunkCount+'청크</span>'+
         '<button class="setBtn" style="padding:2px 8px;font-size:.68rem" onclick="toggleDocView('+i+')">보기</button>'+
         '<button class="iconBtn" style="width:20px;height:20px;font-size:.6rem" onclick="removeRefDoc('+i+')">✕</button>'+
@@ -501,6 +651,7 @@ async function loadSavedPPT(id){
   try{
     const ppt=await apiJson('/ppt-agent/api/ppts/'+id);
     slides=slidesFromJsonSafe(ppt.slides);
+    currentPptId=id;loadAnnotations();  // [2026-10-04] 기존 주석(색연필·메모) 복원
     const list=document.getElementById('slideList');
     list.innerHTML='';
     slides.forEach((s,i)=>{
@@ -528,7 +679,86 @@ async function deleteSavedPPT(id){
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function fmtBytes(n){if(!n)return'-';const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return n.toFixed(i?1:0)+u[i]}
 function fmtDate(ts){if(!ts)return'-';const d=new Date(ts);const p=x=>String(x).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())}
-function setStatus(m){document.getElementById('status').textContent=m}
+// [2026-10-04] 진행바 지원 — 변환 대기가 길어질 때 (완료/전체) 카운트와 진행바를 함께 표시해 막연한 대기를 없앤다.
+function setStatus(m,done,total){
+  // [2026-10-04] statusMsg(span)만 갱신 — 버전 배지(verBadge)는 절대 안 덮이게 분리
+  const el=document.getElementById('statusMsg');
+  if(!el)return;
+  if(done!=null&&total){
+    const pct=Math.min(100,Math.round(done/total*100));
+    el.innerHTML=`${m} <b style="opacity:.8">${done}/${total}</b>`+
+      `<span style="display:block;height:3px;border-radius:2px;background:rgba(127,127,127,.25);margin-top:4px;overflow:hidden">`+
+      `<span style="display:block;height:100%;width:${pct}%;background:var(--pri,#4f8cff);transition:width .25s"></span></span>`;
+  } else el.textContent=m;
+}
+// ── [2026-10-04] 재생 진단 콘솔 — 화면 왼쪽 아래에 최근 이벤트를 항상 표시.
+// "소리가 안 난다"가 어느 단계(TTS 요청/응답/재생시작/재생차단/폴백)에서 막혔는지 즉시 보이게.
+// 같은 내용을 1.5초 버퍼로 서버(/api/dbg)에도 전송해 원격 진단이 가능하게 한다.
+let _dbgLines=[];
+// [2026-10-05] 창 식별자 + 발표 독점 락 — 같은 발표를 창/탭 2개로 열면 두 TTS 큐가 mlx 서버를
+// 2중 경합해 생성 6~27초 포화(실측) → 전 단계 타임아웃·브라우저 폴백 폭발(중국계 음성 유입 근원).
+// 발표 시작 시 localStorage 락을 채택하고 하트비트(3s 인터벌 + TTS 완료 이벤트)로 점유를 알린다.
+// 백그라운드 탭 인터벌 스로틀(최대 1분) 대비 TTS 이벤트 하트비트가 실질 방어.
+const _WIN_ID=Math.random().toString(36).slice(2,6);
+function _presLockGet(){try{return JSON.parse(localStorage.getItem('ppt_agent_pres_lock')||'null')}catch(e){return null}}
+function _presLockSet(){try{localStorage.setItem('ppt_agent_pres_lock',JSON.stringify({id:_WIN_ID,ts:Date.now()}))}catch(e){}}
+function _presLockClear(){try{const l=_presLockGet();if(l&&l.id===_WIN_ID)localStorage.removeItem('ppt_agent_pres_lock')}catch(e){}}
+let _presHb=null;
+function acquirePresLock(){
+  const l=_presLockGet();
+  if(l&&l.id!==_WIN_ID&&Date.now()-l.ts<15000)return false;  // 다른 창이 산 락 보유 중
+  _presLockSet();_presHb=setInterval(_presLockSet,3000);
+  try{if(window.BroadcastChannel){const bc=new BroadcastChannel('ppt-agent');bc.postMessage({type:'pres-start',id:_WIN_ID});bc.close()}}catch(e){}
+  return true;
+}
+function releasePresLock(){if(_presHb){clearInterval(_presHb);_presHb=null}_presLockClear()}
+try{if(window.BroadcastChannel){const _bc=new BroadcastChannel('ppt-agent');_bc.onmessage=e=>{
+  if(e.data&&e.data.type==='pres-start'&&e.data.id!==_WIN_ID&&playing){pausePresentation();setStatus('⚠ 다른 창에서 발표 시작 — 이 창은 일시정지합니다')}
+}}}catch(e){}
+let _dbgRemote=[],_dbgTimer=null;
+function _dbgFlush(){
+  const payload=_dbgRemote.splice(0);_dbgTimer=null;
+  if(!payload.length)return;
+  try{fetch('/ppt-agent/api/dbg',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lines:payload}),keepalive:true}).catch(()=>{})}catch(e){}
+}
+let _dbgEpoch=0;
+// [2026-10-04 v9.3] 화면 콘솔은 ?dbg=1일 때만 — 발표 화면에 로그 텍스트가 보이는 것 숨김(사용자 요청).
+// 원격 수집(_dbgRemote → POST /api/dbg)은 항상 유지 — 자동 무결 루프의 입력원.
+const _dbgVisible=new URLSearchParams(location.search).has('dbg');
+// [2026-10-04 v9.3] 무결 루프 — 서버에서 TTS 정책을 수신해 클램프 내에서 적용.
+// integrity_watch가 정책을 조정하면 다음 페이지 로드부터 자동 반영(코드 수정 없는 자동 패치 통로).
+let TTS_TIMEOUT_MS=60000;
+(async()=>{try{
+  const r=await fetch('/ppt-agent/api/tts-policy');if(!r.ok)return;
+  const p=await r.json();
+  if(p.client_tts_timeout_ms)TTS_TIMEOUT_MS=Math.min(90000,Math.max(20000,+p.client_tts_timeout_ms||60000));
+  dbg('정책 수신 v'+(p.version||0)+' tts타임아웃 '+(TTS_TIMEOUT_MS/1000)+'s');
+}catch(e){}})();
+(function(){const el=document.getElementById('dbgBox');if(el&&_dbgVisible)el.style.display='block'})();
+function dbg(msg){
+  const t=new Date();
+  _dbgLines.push(t.toTimeString().slice(0,8)+' '+msg);
+  if(_dbgLines.length>60)_dbgLines.shift();
+  if(_dbgVisible){
+    const el=document.getElementById('dbgBox');
+    if(el)el.textContent=_dbgLines.slice(-9).join('\n');
+  }
+  // [2026-10-04 v9] 서버 전송분에 페이지 경과시간 부착 — 브라우저 백그라운드 스로틀로 배치가
+  // 뭉쳐 도착해도 이벤트 간 실제 간격을 재구성할 수 있다(진단 정밀도).
+  if(!_dbgEpoch)_dbgEpoch=Date.now();
+  _dbgRemote.push('['+_WIN_ID+'] '+msg+' +'+((Date.now()-_dbgEpoch)/1000).toFixed(1)+'s');  // [2026-10-05] 창 ID 부착 — 다중 창이 같은 로그에 섞여도 구분(실측: 옛 창이 낸 폴백 로그와 신창 로그가 뒤섞여 진단 3시간 소요)
+  if(!_dbgTimer)_dbgTimer=setTimeout(_dbgFlush,1500);
+}
+// 페이지 이탈(발표 종료 → 시연 사이트 이동 포함) 시 미전송분을 sendBeacon으로 마저 전송
+window.addEventListener('pagehide',()=>{
+  releasePresLock();  // [2026-10-05] 창 종료/이탈 시 발표 락 해제 — 새로고침 후 재시작 막힘 방지
+  if(!_dbgRemote.length)return;
+  try{navigator.sendBeacon('/ppt-agent/api/dbg',new Blob([JSON.stringify({lines:_dbgRemote.splice(0)})],{type:'application/json'}))}catch(e){}
+});
+// [2026-10-04 v5] 전역 오류 수집 — 발표 시작 체인(btnPlay.onclick → startPresentation)은
+// .catch가 없어 어디선가 예외가 나면 미처리 거부로 '무음 사망'한다. 콘솔+서버 로그에 남긴다.
+window.addEventListener('unhandledrejection',e=>{dbg('⚠ 미처리 거부: '+((e.reason&&e.reason.message)||e.reason))});
+window.addEventListener('error',e=>{dbg('⚠ 스크립트 오류: '+((e&&e.message)||'?')+' @'+((e&&e.lineno)||'?'))});
 const HANJA=/[一-鿿]/;
 const isHall=t=>/mbc|sbs|kbs\d?|jtbc|ytn|뉴스\s*(입니다|였습니다)|구독과\s*좋아요/i.test(t);
 // [사용자 요청] TV·생활소음·타인 속삭임에는 반응하지 않고 계속 발표 — 확실한 의사 표현("질문있습니다",
@@ -541,16 +771,26 @@ const INTENT_RE=/질문|잠깐|중지|멈춰|멈출|정지|잠시만|물어봐|�
 function detectIntent(text){
   if(!text||text.length<3)return'none';
   if(isHall(text))return'none';
+  // 0. [2026-10-05] 문제 기록 — 발표/대화 중 사용자가 음성 한 마디로 문제를 기록하면 폐루프가
+  // 가동된다("문제 기록 답변 음성이 끊겼어"). 기록은 qa_log.jsonl(state='issue')과 서버의
+  // eval/issues.jsonl에 쌓여 다음 개선 세션의 입력이 된다. 상태를 건드리지 않는 최우선 명령.
+  if(/(문제|오류|버그|에러)[^가-힣]{0,6}(기록|메모|남겨)|기록해\s*(줘|주실)|이거\s*기록/.test(text)&&text.length<40)return'issue';
   // 1. 일시정지 — "잠깐만요", "잠시만요", "멈춰주세요", "stop"
   if(/^(잠깐|잠시|멈춰|멈출|중지|정지|그만|스톱|stop|wait|hold)/i.test(text)&&text.length<20)return'pause';
   // 2. 질문 허락/예고 — "질문 있습니다", "질문해도 될까요?", "궁금한게 있어서요"
-  if(/(질문해도|물어봐도|여쭤봐도|질문 있|질문할게|질문드릴|질문 좀|궁금한게 있|궁금한 것이|질문이 있)/.test(text)&&text.length<30)return'ask';
+  // [2026-10-05] STT 무공백/변형형 보강 — "질문있습니다"(띄어쓰기 없음·STT 빈출), "질문 하나
+  // 있습니다", "질문드리겠습니다", "여쭤볼 게 있습니다", "물어볼게요"가 ask 대신 intent로 분류돼
+  // LLM이 "질문있습니다"를 질문 본문으로 착각해 답변하던 문제 수정.
+  if(/(질문.{0,4}있|질문할게|질문드릴|질문드리|질문\s*좀|질문해도|물어봐도|물어볼게|여쭤(봐도|볼)|궁금한\s*게|궁금한\s*것)/.test(text)&&text.length<30)return'ask';
+  // [2026-10-05 v9] 불만/재촉 — "질문 안 받나요?"를 의문형 종결(나요) 탓에 질문 '본문'으로 착각해
+  // LLM이 말도 안 되게 문자 답변한 실측([i5c0] 12:19 qa_log). 이런 메타 발화는 질문 모드 진입 트리거로 본다.
+  if(/질문.{0,6}(안\s*받|못\s*받|받지\s*않|왜\s*안)|질문\s*안\s*되나|(대답|답변).{0,6}(왜\s*안|안\s*하|못\s*하)/.test(text)&&text.length<30)return'ask';  // [2026-10-05 v9c] "물어봤는데 왜 대답 안 하죠"도 불만으로 — 질문 본문 오인해 불만 문장이 지식으로 습득 오염된 실측([i5el] +104.7s) 차단
   // 3. 직접 질문 — 의문 부호, 의문형 종결어미, 질문어 포함
   if(/[?？]/.test(text))return'question';
   if(/(까요|나요|지요|죠|가요|인가요|을까요|ㄹ까요|습니까|ㅂ니까|니까|ㄴ가요)$/m.test(text.trim()))return'question';
   // [2026-09-29] "설명 좀 더 해주세요"처럼 요청어와 동사 사이에 다른 말이 끼면(원래 붙어 있어야
   // 매칭되는 "설명해"/"가르쳐줘" 패턴이라) 질문으로 인식 못 하고 그냥 넘어가던 문제 — 6자 이내 간격 허용.
-  if(/어떻게|왜\s|무엇을|뭐(에요|야|예요|죠)|누가\s|언제\s|어디(에요|서|세요)|어느\s|몇\s|얼마(나|에|예요)|무슨\s|어떤\s|궁금(해|한|하)|알고\s싶|알려(줘|주세요)|설명.{0,6}(해|줘)|가르쳐.{0,6}(줘|주세요)|이해가\s안/.test(text))return'question';
+  if(/어떻게|왜\s|무엇을|뭐(에요|야|예요|죠)|누가\s|언제\s|어디(에요|서|세요)|어느\s|몇\s|얼마(나|에|예요)|무슨\s|어떤\s|궁금(해|한|하)|알고\s싶|알려(줘|주세요)|들어\s*봤|아\s*세요|설명.{0,6}(해|줘)|가르쳐.{0,6}(줘|주세요)|이해가\s안/.test(text))return'question';  // [2026-10-05 v9c] "팔란티어에 대해서 들어 봤어요?"처럼 의문 어미가 생략된 구어 질문 추가 — STT가 ?를 안 붙이는 실측 다수
   // 4. 기존 키워드 기반 인텐트
   if(INTENT_RE.test(text))return'intent';
   return'none';
@@ -716,7 +956,27 @@ async function parsePPTX(file){
 }
 function parseNotesXML(x){const d=new DOMParser().parseFromString(x,'application/xml');const ns='http://schemas.openxmlformats.org/drawingml/2006/main';let n=[...d.getElementsByTagNameNS(ns,'t')].map(t=>t.textContent).join(' ');const tk=n.replace(/\s+/g,' ').trim().split(' ');if(tk.length>1&&/^\d+$/.test(tk[tk.length-1]))tk.pop();return tk.join(' ')}
 
-function splitSentences(text){if(!text)return[];const parts=text.replace(/\s+/g,' ').split(/(?<=[.!?다요님])\s+/);const merged=[];for(const p of parts){const t=p.trim();if(!t)continue;if(merged.length&&merged[merged.length-1].length+t.length<40)merged[merged.length-1]+=' '+t;else merged.push(t)}return merged.filter(s=>s.length>=5)}
+function splitSentences(text){if(!text)return[];const parts=text.replace(/\s+/g,' ').split(/(?<=[.!?다요님])\s+/);
+// [2026-10-04 v6] 55자+ 문장은 쉼표 경계에서 2차 분할 — 긴 문장 하나가 TTS에서 수십 초 걸려(실측 34.7초)
+// 재생이 그만큼 대기했다. 짧은 조각은 생성이 빠르고 runaway 확률도 낮아 "출력 대기 없음"에 필수.
+// [2026-10-04 v7] 조각에 soft 플래그 추가 — soft=true(쉼표/강제 분할로 끊긴 조각)는 재생 휴지 200ms,
+// 문장 끝 조각은 기존처럼 700ms. v6에서 조각 간에도 700ms가 들어가 문장 중간 무음이 생겼다(사용자 불만).
+const out=[];
+for(const part of parts){const t=part.trim();if(!t)continue;
+  if(t.length<=55){out.push({t,soft:false});continue}
+  let cur='';
+  for(const sub of t.split(/(?<=[,;])\s+/)){const q=sub.trim();if(!q)continue;
+    if(!cur)cur=q;
+    else if(cur.length+q.length+1<=55)cur+=' '+q;
+    else{out.push({t:cur,soft:true});cur=q}  // 다음 조각이 이어짐 → 쉼표 경계(soft)
+    while(cur.length>60){let cut=cur.lastIndexOf(' ',60);if(cut<30)cut=60;out.push({t:cur.slice(0,cut).trim(),soft:true});cur=cur.slice(cut).trim()}
+  }
+  if(cur)out.push({t:cur,soft:false})}  // 각 문장의 마지막 조각은 문장 끝
+const merged=[],softs=[];
+for(const p of out){const t=p.t;if(!t)continue;
+  if(merged.length&&merged[merged.length-1].length+t.length<40){merged[merged.length-1]+=' '+t;softs[softs.length-1]=p.soft}
+  else{merged.push(t);softs.push(p.soft)}}
+return merged.map((t,i)=>({t,soft:!!softs[i]})).filter(o=>o.t.length>=5)}
 
 async function generateScript(idx){const s=slides[idx];
 // [2026-09-26 실사용 리포트] "슬라이드와 무관한 내용(비판적 사고 등)을 지어냄" — 근본 원인:
@@ -758,7 +1018,9 @@ if(ragEnabled&&refDocs.length){
   }catch(e){}
 }
 if(scriptEngine==='openai'){try{const r=await fetch(OPENAI_SCRIPT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));if(j.content&&j.content.length>20){s.script=j.content.trim();return true}}catch(e){}}
-const r=await fetch(LOCAL_LLM,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'qwen3:14b',messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));const t=(j.message&&j.message.content||'').trim();if(t.length>10){s.script=t;return true}s.script=s.note||s.bullets.join('. ')||s.title||'내용이 없습니다.';return s.script.length>5}
+// [2026-10-04] model 필드 제거 — n8n koen_local_llm 게이트웨이의 기본 모델(성능검증 완료된 qwen3:30b-a3b)을 단일 진실원으로 사용.
+// 구모델(qwen3:14b)은 설치조차 없어 매 요청 실패 후 원문 폴백이었음 — "스피커노트 변환" 실패의 원인.
+const r=await fetch(LOCAL_LLM,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));const t=(j.message&&j.message.content||'').trim();if(t.length>10){s.script=t;return true}s.script=s.note||s.bullets.join('. ')||s.title||'내용이 없습니다.';return s.script.length>5}
 // [2026-10-02] 슬라이드가 많아질수록 전환마다 무음이 길어지는 문제의 핵심 원인 — generateScript(idx+1)이
 // 슬라이드 N이 다 끝난 뒤에야 호출돼서 LLM 왕복을 매번 그대로 기다렸다. ensureScript()는 같은 슬라이드에
 // 대한 생성 요청을 하나의 Promise로 합쳐주는 래퍼 — 이 래퍼 덕분에 "지금 당장 필요해서 부르는 곳"과
@@ -771,9 +1033,82 @@ function ensureScript(idx){
   }
   return s._scriptPromise;
 }
+// [2026-10-04] TTS 전역 직렬 큐 — 실측: mlx Qwen3-TTS 서버에 요청을 동시에 보내면 GPU 경합으로
+// EOS 토큰 생성에 실패해 94~96초 무음 runaway(문장 5개 동시 → 전부 94초). 순차 호출은 0.6~1.5s로 안정.
+// 모든 문장 변환을 이 큐 하나로 직렬화하고, 문장별 Promise를 슬라이드 객체에 캐시해
+// 프리페치와 재생 소비가 같은 문장을 중복 요청하지 않게 한다.
+// [2026-10-04 v5] TTS 직렬 큐 — 배열 펌프 + 우선순위. 기존 promise-체인 큐는 "실패 문장 재시도"가
+// 큐 맨 뒤로 가서 프리페치 10여 개+백로그 뒤에 줄서 몇 분씩 대기하는 블랙홀이 있었다(실측:
+// 첫 문장 재생까지 3분 15초). front=true면 큐 선두로 — 재시도와 대화 멘트가 프리페치를 끼어든다.
+let _ttsQ=[],_ttsRunning=false,_ttsCur=null;  // _ttsCur: 인플라이트 1건 — 중단(abort) 대상 추적
+function enqueueTts(text,front,tag){
+  return new Promise((res,rej)=>{
+    const j={text,res,rej,tag,ac:new AbortController()};
+    if(front)_ttsQ.unshift(j);else _ttsQ.push(j);
+    _pumpTts();
+  });
+}
+// [2026-10-05] 프리페치 백로그 폐기 — Q&A 진입 시 발표 문장 선변환 줄을 비워 답변·멘트 TTS가
+// 뒤로 밀리는 것을 원천 차단(실측 03:52 고장: 후속 문장이 백로그 뒤 15s 초과 → 답변 중도 침묵).
+// 폐기 잡은 null로 귀결 — _audioFetch가 정리돼 발표 재개 시 해당 문장은 새로 요청되고,
+// 대기 중이던 재생 폴링 루프는 interrupted 체크로 빠진다.
+// [2026-10-05 v2] 인플라이트 1건도 즉시 중단 — 직렬 큐라 인플라이트가 곧 전부다. 프록시 stochastic
+// EOS 재시도 사슬(REJECT→SPLIT 반복, 실측 19:08 고장에서 44.5s)이 큐를 그대로 묶어두면 대기
+// 제거만으로는 Q&A 멘트(6s)·답변 음성(20s)이 전부 타임아웃됐다(무음 → "계속 진행?" 전환).
+// 각 잡의 AbortController를 ttsSentence fetch에 흘려보내 중단한다. 정리 범위에 맞는 태그만:
+// Q&A 진입(무scope)=프리페치만, 답변 잔여 폐기('qa')=답변 조각만, 발표 정지(true)=전부.
+function purgePrefetchTts(scope){
+  // scope: true=전체(발표 정지), 'qa'=답변 조각만(답변 타임아웃 잔여 폐기), 생략=프리페치만(Q&A 우선)
+  let n=0;
+  for(let i=_ttsQ.length-1;i>=0;i--){
+    if(scope==='qa'){if(_ttsQ[i].tag!=='qa')continue}
+    else if(!scope&&_ttsQ[i].tag!=='prefetch')continue;
+    const j=_ttsQ.splice(i,1)[0];n++;
+    try{j.res(null)}catch(e){}
+  }
+  if(_ttsCur&&(scope===true||_ttsCur.tag==='prefetch'||(scope==='qa'&&_ttsCur.tag==='qa'))){
+    try{_ttsCur.ac.abort()}catch(e){}n++;
+  }
+  if(n)dbg('TTS 큐 '+(scope===true?'전체':scope==='qa'?'답변':'프리페치')+' '+n+'건 폐기'+(scope===true?' — 발표 정지':scope==='qa'?' — 답변 미완성':' — Q&A 우선')+'(인플라이트 중단 포함)');
+  return n;
+}
+async function _pumpTts(){
+  if(_ttsRunning)return;_ttsRunning=true;
+  while(_ttsQ.length){
+    const j=_ttsQ.shift();_ttsCur=j;
+    try{j.res(await ttsSentence(j.text,j.ac.signal))}catch(e){j.rej(e)}
+    _ttsCur=null;
+  }
+  _ttsRunning=false;
+}
+function getSlideAudio(s,idx,text,front){
+  if(s._audioCache&&s._audioCache[idx])return Promise.resolve(s._audioCache[idx]);
+  if(!s._audioFetch)s._audioFetch={};
+  if(!s._audioFetch[idx]){
+    s._audioDone=s._audioDone||0;  // 진행바용 완료 카운터
+    // [2026-10-04] 실패(null)한 문장은 _audioFetch에서 제거 — 그대로 남아있으면 그 슬라이드를
+    // 다시 방문해도 영원히 실패 결과를 재사용해 소리가 안 남. 성공만 캐시, 실패는 재시도.
+    s._audioFetch[idx]=enqueueTts(text,front,'prefetch').then(u=>{s._audioDone++;if(u&&s._audioCache){s._audioCache[idx]=u}else{delete s._audioFetch[idx]}return u}).catch(()=>{s._audioDone++;delete s._audioFetch[idx];return null});
+  }
+  return s._audioFetch[idx];
+}
 function scriptToSentences(script){
-  const ss=splitSentences(script).map(txt=>txt.replace(/https?:\/\/[^\s<>"']+/g,'').trim()).filter(txt=>txt.length>3);
-  return ss.length?ss:[script.replace(/https?:\/\/[^\s<>"']+/g,'').trim()||'발표를 마치겠습니다.'];
+  // [{t, soft}] 반환 — soft=true는 쉼표/강제 분할로 생긴 조각(재생 휴지 200ms), false는 문장 끝(700ms).
+  // [2026-10-05] 열거형 문장 선제 분할 — "첫째,…","둘째,…","결국,…" 문장이 mlx에서 매번 조기 EOS
+  // (REJECT 3회+분할 스톰, 실측 20~44초/문장)라 프록시가 결국 첫 쉼표에서 자른다. 클라이언트가
+  // 미리 같은 지점을 자르면 재시도 낭비 없이 짧은 조각이 1~2회 만에 성공한다(침묵 스톰 제거).
+  const ENUM=/^(첫째|둘째|셋째|넷째|다섯째|여섯째|일곱째|여덟째|아홉째|열째|먼저|다음으로|마지막으로|결국|즉|하지만|반면|그러나)[,，]/;
+  const expand=p=>{
+    const m=ENUM.exec(p.t);
+    if(m&&p.t.length>20){
+      const cut=m[0].length;  // 앵커 ^ 매칭이므로 첫 쉼표 뒤 지점
+      const a=p.t.slice(0,cut),b=p.t.slice(cut);
+      if(a.length>2&&b.length>6)return [{t:a,soft:true},{t:b,soft:p.soft}];
+    }
+    return [p];
+  };
+  const ss=splitSentences(script).map(p=>({t:p.t.replace(/https?:\/\/[^\s<>"']+/g,'').trim(),soft:p.soft})).filter(p=>p.t.length>3).flatMap(expand);
+  return ss.length?ss:[{t:script.replace(/https?:\/\/[^\s<>"']+/g,'').trim()||'발표를 마치겠습니다.',soft:false}];
 }
 // 슬라이드 idx가 "현재 슬라이드"가 되는 순간(=아직 그 슬라이드가 말하는 중인 동안) 바로 다음 슬라이드의
 // 스크립트와 첫 문장 음성을 미리 만들어둔다 — presentSlide가 실제로 그 슬라이드로 넘어갈 때는 이미
@@ -786,48 +1121,227 @@ function prefetchNextSlide(idx){
   ensureScript(nxt).then(()=>{
     if(!ns.script)return;
     if(!ns._audioCache)ns._audioCache={};
-    if(!ns._audioCache[0]){
-      const sents=scriptToSentences(ns.script);
-      ttsSentence(sents[0]).then(u=>{if(u)ns._audioCache[0]=u}).catch(()=>{});
-    }
+    // [2026-10-04] 첫 문장만 → 전체 문장 프리페치로 확장. 직렬 큐가 순서를 보장하므로
+    // 현재 슬라이드 문장들이 먼저 등록된 뒤 자연히 이어서 처리된다 — 다음 페이지 전환 시 첫 문장부터 전부 캐시 완료.
+    scriptToSentences(ns.script).forEach((p,i)=>getSlideAudio(ns,i,p.t));
   });
 }
 
-async function ttsSentence(text){if(!text||text.length<3)return null;
+// [2026-10-05 v2] 영어→한글 음역 — v1의 미등록 단어 글자 낭독("스펠링 읽기" 불만) 해결.
+// ① 사전 테이블(덱·업무 용어 우선) ② 대문자 약어(2~6자: SKT/LG/E2E)는 글자 낭독이 관례상 정답
+// ③ 나머지 일반 영어는 규칙 기반 음역(G2P)으로 단어 발음 한글화(Oracle→오라클, Member→멤버).
+// TTS 입력만 변환 — 화면 자막·답변 원문·RAG 검색어는 원문 불변.
+const _KONIZE_TABLE={ssot:'에스소트',rbac:'알비에이씨',sso:'에스에스오',mcp:'엠씨피',saas:'사스',axos:'엑소스',wizbase:'위즈베이스','wiz-ax':'위즈엑스',databricks:'데이터브릭스',snowflake:'스노우플레이크',sdi:'에스디아이',sds:'에스디에스',ax:'에이엑스',oci:'오씨아이',rag:'랙',llm:'엘엘엠',api:'에이피아이',kpi:'케이피아이',sla:'에스엘에이',crm:'씨알엠',erp:'이알피',ai:'에이아이',gpu:'지피유',cpu:'씨피유',npu:'엔피유',ui:'유아이',ux:'유엑스',sql:'시퀄',db:'디비',ds:'디에스',ppt:'피피티',qa:'큐에이',qc:'큐씨',ml:'엠엘',hr:'에이치알',it:'아이티',e2e:'이투이',oracle:'오라클',exadata:'엑사데이터',expertise:'익스퍼티스',innovation:'이노베이션',award:'어워드',apac:'에이팩',emea:'이메아',cloud:'클라우드',platform:'플랫폼',agent:'에이전트',pipeline:'파이프라인',data:'데이터',database:'데이터베이스',base:'베이스',model:'모델',modeling:'모델링',work:'워크',flow:'플로',workflow:'워크플로',framework:'프레임워크',network:'네트워크',server:'서버',service:'서비스',solution:'솔루션',system:'시스템',migration:'마이그레이션',integration:'인테그레이션',engine:'엔진',developer:'디벨로퍼',deploy:'디플로이',deployment:'디플로이먼트',container:'컨테이너',cluster:'클러스터',security:'시큐리티',performance:'퍼포먼스',analytics:'애널리틱스',dashboard:'대시보드',report:'리포트',project:'프로젝트',team:'팀',customer:'커스터머',client:'클라이언트',partner:'파트너',business:'비즈니스',market:'마켓',meeting:'미팅',plan:'플랜',roadmap:'로드맵',milestone:'마일스톤',quality:'퀄리티',test:'테스트',testing:'테스팅',release:'릴리스',version:'버전',update:'업데이트',upgrade:'업그레이드',backup:'백업',recovery:'리커버리',monitoring:'모니터링',batch:'배치',task:'태스크',stream:'스트림',event:'이벤트',message:'메시지',queue:'큐',token:'토큰',prompt:'프롬프트',chat:'챗',bot:'봇',assistant:'어시스턴트',copilot:'코파일럿',governance:'거버넌스',tracking:'트래킹',ontology:'온톨로지',insight:'인사이트',feature:'피처',future:'퓨처',structure:'스트럭처',profile:'프로파일',file:'파일',site:'사이트',cache:'캐시',design:'디자인',support:'서포트',export:'익스포트',import:'임포트',process:'프로세스',product:'프로덕트',production:'프로덕션',standard:'스탠다드',strategy:'스트래티지',sample:'샘플',simple:'심플',single:'싱글',double:'더블',triple:'트리플',scale:'스케일',scaling:'스케일링',group:'그룹',change:'체인지',range:'레인지',manage:'매니지',management:'매니지먼트',page:'페이지',image:'이미지',people:'피플',company:'컴퍼니',global:'글로벌',local:'로컬',mobile:'모바일',digital:'디지털',virtual:'버추얼',time:'타임',live:'라이브',drive:'드라이브',native:'네이티브',computer:'컴퓨터',music:'뮤직',view:'뷰',review:'리뷰',interview:'인터뷰',value:'밸류',new:'뉴',pure:'퓨어',open:'오픈',use:'유즈',close:'클로즈',rise:'라이즈',phase:'페이즈',enterprise:'엔터프라이즈',knowledge:'나리지',delivery:'딜리버리',intelligence:'인텔리전스',sources:'소시즈',source:'소스','closed-loop':'클로즈드루프',closed:'클로즈드',loop:'루프',layer:'레이어',based:'베이스드',used:'유즈드',command:'커맨드',the:'더',this:'디스',that:'댓',and:'앤드',of:'오브',to:'투',for:'포',with:'위드',from:'프롬',
+on:'온',in:'인',is:'이즈',it:'잇',as:'애즈',at:'앳',by:'바이',my:'마이',we:'위',be:'비',do:'두',go:'고',no:'노',so:'소',up:'업',or:'오',an:'안',not:'낫',but:'벗',can:'캔',will:'윌',all:'올',course:'코스',bridge:'브리지',output:'아웃풋',
+taxi:'택시',wait:'웨이트',know:'노',knows:'노즈',word:'워드',world:'월드',about:'어바웃',machine:'머신',architecture:'아키텍처',quarter:'쿼터'};
+const _KONIZE_LETTER={a:'에이',b:'비',c:'씨',d:'디',e:'이',f:'에프',g:'지',h:'에이치',i:'아이',j:'제이',k:'케이',l:'엘',m:'엠',n:'엔',o:'오',p:'피',q:'큐',r:'알',s:'에스',t:'티',u:'유',v:'브이',w:'더블유',x:'엑스',y:'와이',z:'제트',0:'영',1:'원',2:'투',3:'쓰리',4:'포',5:'파이브',6:'식스',7:'세븐',8:'에잇',9:'나인'};
+// G2P(영어 철자→한글 발음): 한글 자모 조합 기반 규칙 음역
+const _CHO={'':11,g:0,kk:1,n:2,d:3,tt:4,r:5,l:5,m:6,b:7,pp:8,s:9,ss:10,j:12,jj:13,ch:14,k:15,t:16,p:17,h:18}; // l=ㄹ(r과 동일)
+const _JUNG={a:0,ae:1,ya:2,yae:3,eo:4,e:5,yeo:6,ye:7,o:8,wa:9,wae:10,oe:11,yo:12,u:13,wo:14,we:15,wi:16,yu:17,eu:18,ui:19,i:20};
+const _JONG={'':0,g:1,gg:2,n:4,d:7,r:8,m:16,b:17,s:19,ss:20,ng:21,j:22,ch:23,k:24,t:25,p:26,h:27};
+function _syl(c,v,j){return String.fromCharCode(0xAC00+((_CHO[c]??11)*21+(_JUNG[v]??0))*28+(_JONG[j]??0))}
+function _g2pEn(word){
+  let w=word.toLowerCase().replace(/[^a-z]/g,'');
+  if(!w)return null;
+  let magic=false;  // magic-e: 어말 e는 앞 모음 장음 + c/g 연음(page→페이지). 단 과거형·복수형 ed/es 어미는 제외
+  if(w.length>2&&/[^aeiou]e$/.test(w)&&!/e[ds]$/.test(w)){magic=true;w=w.slice(0,-1)}
+  const toks=[];let i=0;
+  const V=k=>toks.push({t:'v',k}),C=k=>toks.push({t:'c',k});
+  const STOP='kgbpdt';
+  while(i<w.length){
+    const two=w.substr(i,2),three=w.substr(i,3),nv=w[i+1]||'';
+    // w/y 글라이드(what→완식? → 왓: w+a→ㅘ)
+    if((w[i]==='w'||w[i]==='y')&&/[aeiou]/.test(nv)){
+      const y=w[i]==='y';
+      if(y&&two==='ay'){V('e');V('i');i+=2;continue}
+      if(!y&&(two==='ai'||two==='ei'||two==='ay')){i+=1;continue} // wait→웨이트: w 묵음
+      const map=y?{a:'ya',e:'ye',o:'yo',u:'yu',i:'i'}:{a:'wa',e:'we',o:'wo',u:'u',i:'wi'};
+      if(map[nv]){V(map[nv]);i+=2;continue}
+    }
+    if(two==='you'){V('u');i+=2;continue}
+    if(three==='igh'){V('a');V('i');i+=3;continue} // light→라이트
+    if(two==='ee'||two==='ea'||two==='ie'){V('i');i+=2;continue}
+    if(two==='oo'){V('u');i+=2;continue}
+    if(two==='oa'){V('o');i+=2;continue}
+    if(two==='dg'){C('j');i+=2;continue} // bridge→브리지, edge→에지 — d 묵음
+    if(two==='ou'&&nv==='r'&&!/[aeiou]/.test(w[i+2]||'')){V('o');i+=3;continue} // course→코스 — our+자음은 r 소실
+    if(two==='ou'||two==='ow'){V('a');V('u');i+=2;continue}
+    if(two==='oi'||two==='oy'){V('o');V('i');i+=2;continue}
+    if(two==='ai'||two==='ay'||two==='ei'){V('e');V('i');i+=2;continue}
+    if(two==='au'||two==='aw'){V('o');i+=2;continue}
+    if(two==='ue'||two==='ew'){V('yu');i+=2;continue} // new→뉴
+    if(three==='iew'){V('yu');i+=3;continue} // view→뷰
+    if(two==='ui'){V('u');i+=2;continue}
+    // r-colored 모음(car→카, member→멤버, doctor→닥터)
+    if(magic&&two==='ar'&&i+2===w.length-1){V('e');V('eo');i+=2;continue} // care→케어
+    if(two==='ar'){V('a');i+=2;continue}
+    if(two==='er'||two==='ir'||two==='ur'){V('eo');i+=2;continue}
+    if(two==='or'){const af=w[i+2]||'';V(!af||(/[kgbpdtmn]/.test(af)&&i+2===w.length-1)?'eo':'o');i+=2;continue}
+    if('aeiou'.includes(w[i])){
+      const rest=w.slice(i+1);
+      const long=magic&&rest.length===1&&/[bcdfgklmnprstvz]/.test(rest); // 단일 자음만(bridge의 dg는 장음 아님)
+      const c=w[i];
+      if(c==='a'){if(long){V('e');V('i')}else V('a')}
+      else if(c==='e'){V(long?'i':'e')}
+      else if(c==='i'){if(long||two==='ind'||two==='ild'){V('a');V('i')}else V('i')}
+      else if(c==='o'){V('o')}
+      else{V(long?'yu':'eo')}
+      i+=1;continue}
+    if(w[i]==='y'){V('i');i+=1;continue} // happy→하피, system→시스템
+    // 3~4자 자음 규칙
+    if(three==='ture'){C('ch');V('eo');i+=4;continue} // future→퓨처, structure→스트럭처
+    if(w.substr(i,5)==='ssion'){C('s');V('eo');C('n');i+=5;continue} // mission→미션
+    if(three==='tion'){C('s');V('eo');C('n');i+=4;continue} // nation→네이션
+    if(three==='sion'){C('j');V('eo');C('n');i+=4;continue} // vision→비전
+    if(three==='cial'||three==='tial'){C('sh');V('yeo');C('l');i+=4;continue} // special→스페셜
+    if(two==='ch'){C('ch');i+=2;continue}
+    if(two==='sh'){C('sh');i+=2;continue}
+    if(two==='th'){C('s');i+=2;continue}
+    if(two==='ph'){C('p');i+=2;continue}
+    if(two==='ck'){C('k');i+=2;continue}
+    if(two==='qu'){C('k');V({a:'wo',e:'we',i:'wi',o:'wo',u:'u'}[nv]||'u');i+='aeiou'.includes(nv)?3:2;continue} // quarter→쿼터(모음까지 소비)
+    if(two==='wh'){i+=1;continue} // w 글라이드 소비 후 h 묵음
+    if(two==='kn'&&i===0){C('n');i+=2;continue}
+    if(two==='wr'&&i===0){C('r');i+=2;continue}
+    if(two==='ng'){C('ng');i+=2;continue}
+    if(two==='nk'){C('ng');C('k');i+=2;continue} // think→씽크식 비음 동화
+    if(two==='gh'){if(/[aeiou]/.test(w[i+2]||'')||!nv){C('g');i+=2;continue}i+=2;continue}
+    if(two[0]===two[1]&&two[0]!=='l'&&/[bcdfglmnprstz]/.test(two[0])){i+=1;continue} // 중복 자음 1개만(better→베터)
+    // ll은 토큰 2개 유지 → 앞 받침 ㄹ+다음 초성 ㄹ(hello→헬로, salary→살라리)
+    if(w[i]==='c'){C(/[eiy]/.test(nv)||(magic&&i+1===w.length)?'s':'k');i+=1;continue}
+    if(w[i]==='g'){C(/[eiy]/.test(nv)||(magic&&i+1===w.length)?'j':'g');i+=1;continue}
+    if(w[i]==='x'){C('k');C('s');i+=1;continue} // taxi→택시, box→복스
+    const cm={b:'b',d:'d',f:'p',k:'k',l:'l',m:'m',n:'n',p:'p',r:'r',s:'s',t:'t',v:'b',w:'',z:'j',h:'h'};
+    if(cm[w[i]]!==undefined){C(cm[w[i]]);i+=1;continue}
+    i+=1;
+  }
+  // 음절 조립: 코다(받침) 규칙 — 비음·유음은 상시, 파열음은 자음 앞/어말에서만
+  // 이중모음(연속 모음) 뒤 파열음은 받침로 붙이지 않고 독립 음절로(like→라이크, page계)
+  for(let x=1;x<toks.length;x++)if(toks[x].t==='v'&&toks[x-1].t==='v')toks[x]._dp=1;
+  const out=[];let pc;
+  const closeJ=k=>({m:'m',n:'n',ng:'ng',l:'r',k:'g',g:'g',b:'b',p:'b',d:'d'})[k]||null;
+  const ownS=k=>({s:['s','eu'],t:['t','eu'],d:['d','eu'],f:['p','eu'],v:['b','eu'],z:['j','eu'],j:['j','i'],ch:['ch','eu'],sh:['s','eu'],h:null,r:['r','eu'],k:['k','eu'],g:['g','eu'],ng:['ng','eu'],b:['b','eu'],p:['p','eu'],l:['r','eu'],kk:['k','eu'],tt:['t','eu'],pp:['p','eu'],jj:['j','eu']})[k];
+  for(let x=0;x<toks.length;x++){
+    const tk=toks[x];
+    if(tk.t==='v'){out.push({c:pc||'',v:tk.k,j:'',_dp:tk._dp});pc=undefined;continue}
+    if(pc===undefined){pc=tk.k;continue}
+    const jid=closeJ(pc);
+    // 파열음(pc)은 다음이 파열음이거나 어말일 때만 받침 가능(script의 크 vs doctor의 닥)
+    const tkStopOrEnd=STOP.indexOf(tk.k)>=0||x===toks.length-1;
+    const diph=out.length&&out[out.length-1]._dp;
+    const canClose=jid&&!(diph&&STOP.indexOf(pc)>=0)&&(STOP.indexOf(pc)<0||tkStopOrEnd);
+    if(canClose&&out.length&&!out[out.length-1].j){out[out.length-1].j=jid}
+    else{const ow=ownS(pc);if(ow)out.push({c:ow[0],v:ow[1],j:''})}
+    pc=tk.k;
+  }
+  if(pc!==undefined){
+    const prev=out[out.length-1];
+    const jid=closeJ(pc);
+    if(prev&&!prev.j&&jid&&pc!=='t'&&pc!=='s'&&!prev._dp){prev.j=jid}  // 어말 t→트, s→스가 관례(캣/버스), 이중모음 뒤엔 독립음절(라이크)
+    else{const ow=ownS(pc);if(ow)out.push({c:ow[0],v:ow[1],j:''})}
+  }
+  const r=out.map(s=>_syl(s.c,s.v,s.j)).join('');
+  // 1음절은 받침 있을 때만 인정(온/룹) — 자모 하나짜리 조각은 실패로 간주
+  return /[가-힣]/.test(r)&&(r.length>=2||out.some(s=>s.j))?r:null;
+}
+function _koWord(w){
+  const k=w.toLowerCase();
+  // 대문자 약어(2~6자)는 글자 낭독이 정답(SKT→에스케이티)
+  if(/^[A-Z]{2,6}$/.test(w))return [...k].map(c=>_KONIZE_LETTER[c]||'').join('');
+  const g=_g2pEn(k);
+  return g||[...k].map(c=>_KONIZE_LETTER[c]||'').join('');
+}
+function koNizeTts(text){
+  if(!text||!/[A-Za-z]/.test(text))return text;
+  const hits=[];
+  const out=String(text).replace(/[A-Za-z][A-Za-z0-9]*(?:[-][A-Za-z0-9]+)*/g,w=>{
+    const k=w.toLowerCase();
+    if(_KONIZE_TABLE[k]){hits.push(w);return _KONIZE_TABLE[k]}
+    if(/-/.test(w)){hits.push(w);return w.split('-').map(p=>_koWord(p)).join('')}
+    hits.push(w);
+    return _koWord(w);
+  });
+  if(hits.length)dbg('TTS 한글화 '+hits.length+'건: '+hits.slice(0,5).join(','));
+  return out;
+}
+// [2026-10-05 v2] signal — 직렬 큐가 폐기(purge) 시 인플라이트 요청을 즉시 중단할 수 있게 하는
+// 외부 중단 신호(19:08 고장: 44.5s 프리페치 사슬이 Q&A 음성을 전부 굶겨 침묵). 신호가 끊기면
+// 진행 중 fetch가 즉시 거부되고, ttsSentence는 기존 정책대로 null 반환(재요청은 발표 재개 시).
+async function ttsSentence(text,signal){if(!text||text.length<3)return null;
+const _t0=Date.now();
 try{
   if(ttsEngine==='openai'){
     // [2026-09-29] 네트워크 순간 오류 한 번으로 바로 로컬→브라우저 폴백까지 떨어져
     // 목소리가 튀는 걸 막기 위해 1회 재시도(200ms 후) — 일시적 오류가 가장 흔한 트리거였음.
     for(let attempt=0;attempt<2;attempt++){
+      if(signal&&signal.aborted)break;  // [2026-10-05 v2] 외부 중단 — 재시도 루프 즉시 탈출
       try{
         const r=await fetch('https://bc.wizbase.ai.kr/webhook/koen-openai-tts-bin',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({input:text,voice:ttsVoice,speed:ttsSpeed})});
-        if(r.ok){const b=await r.blob();if(b.size>1000)return URL.createObjectURL(b);console.warn('TTS(openai): 응답 크기 이상',b.size)}
-        else console.warn('TTS(openai) 실패:',r.status,'attempt',attempt)
-      }catch(e){console.warn('TTS(openai) 예외:',e.message,'attempt',attempt)}
+          body:JSON.stringify({input:text,voice:ttsVoice,speed:ttsSpeed}),signal});
+        if(r.ok){const b=await r.blob();if(b.size>1000){dbg('TTS[openai] OK '+b.size+'B '+(Date.now()-_t0)+'ms');return URL.createObjectURL(b)}console.warn('TTS(openai): 응답 크기 이상',b.size)}
+        else{console.warn('TTS(openai) 실패:',r.status,'attempt',attempt);dbg('TTS[openai] HTTP'+r.status)}
+      }catch(e){console.warn('TTS(openai) 예외:',e.message,'attempt',attempt);dbg('TTS[openai] 예외:'+e.message)}
       if(attempt===0)await new Promise(res=>setTimeout(res,200));
     }
   }
-  const r=await fetch(TTS_URL,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model:'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16',input:text,voice:ttsVoice,language:'ko',response_format:'wav',instruct:STYLE})});
-  if(!r.ok){console.warn('TTS(local) 실패:',r.status);return null}
-  const b=await r.blob();if(b.size>1000)return URL.createObjectURL(b);console.warn('TTS(local): 응답 크기 이상',b.size)
-}catch(e){console.warn('TTS 예외:',e)}return null}
+  // [2026-10-04] 로컬 TTS 정지 방어 — 타임아웃(정상 생성은 1~2초). 서버가 오래 붙잡혀도
+  // "변환 중…"에 갇히지 않게 하고, 실패 시 null 반환으로 브라우저 폴백이 이어받는다.
+  // [2026-10-04 v9.3] 타임아웃은 무결 루프 정책(/api/tts-policy)에서 수신한 값 사용.
+  const ac=new AbortController();const to=setTimeout(()=>ac.abort(),TTS_TIMEOUT_MS);  // [2026-10-04 v5] 20s→60s — LLM 스크립트 생성과 GPU 경합 시 정상 생성도 9~26초(실측). 20s는 정상 요청을 계속 죽여 폴백 남발. 브라우저 큐가 직렬화하므로 이 60s는 순수 생성 시간에만 쓰인다.
+  if(signal){if(signal.aborted)ac.abort();else signal.addEventListener('abort',()=>ac.abort(),{once:true})}  // [2026-10-05 v2] 큐 폐기 → 인플라이트 즉시 중단
+  let r;
+  try{
+    r=await fetch(TTS_URL,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16',input:koNizeTts(text),voice:ttsVoice,language:'ko',response_format:'wav',instruct:STYLE,temperature:0.15,repetition_penalty:1.15}),signal:ac.signal});  // [2026-10-05] 0.3→0.15 — 재시도·조각마다 온도가 달라 화자 특성이 흔들리는(남성음 스침) 드리프트 완화: 1차 시도와 재시도 온도를 통일. [2026-10-05 v8] repetition_penalty 1.15 — EOS 미스 grind(동일 문장 33~39% 빈도로 max_tokens 캡까지 무음 생성, 실측 96s 캡 도달)를 28/28샘플 완전 제거, 정상 생성 속도·길이 무영향
+  }catch(e){dbg('TTS[local] '+e.name+(ac.signal.aborted?'('+(TTS_TIMEOUT_MS/1000)+'s타임아웃)':'')+':'+(e.message||'').slice(0,40));throw e}
+  finally{clearTimeout(to)}
+  if(!r.ok){console.warn('TTS(local) 실패:',r.status);dbg('TTS[local] HTTP'+r.status+' '+(Date.now()-_t0)+'ms');return null}
+  const b=await r.blob();if(b.size>1000&&b.size<4000000){const _dt=Date.now()-_t0;if(playing)_presLockSet();  // [2026-10-05] TTS 활동 하트비트 — 백그라운드 탭 인터벌 스로틀 대비 락 갱신
+dbg('TTS[local] OK '+b.size+'B '+_dt+'ms'+(_dt>=5000?' ⚠지연':''));if(_dt>=5000)qaLog('tts_slow',{ms:_dt,chars:text.length,size:b.size});return URL.createObjectURL(b)}console.warn('TTS(local): 응답 크기 이상',b.size);dbg('TTS[local] 크이상 '+b.size+'B')
+}catch(e){console.warn('TTS 예외:',e);dbg('TTS 예외:'+(e.message||e.name||'').slice(0,50))}
+dbg('TTS 실패 → 브라우저 폴백');return null}
 function playAudio(url){return new Promise(r=>{
+  dbg('재생 모듈 진입 — '+(url?'url 있음':'url 없음'));
   if(!url){r();return}
   if(audioEl){audioEl.pause();audioEl=null}
   audioEl=new Audio();
   ttsSpeaking=true;
-  audioEl.onended=()=>{ttsSpeaking=false;r()};
-  audioEl.onerror=(e)=>{console.warn('오디오 재생 오류:',audioEl.error);ttsSpeaking=false;r()};
-  audioEl.onplay=()=>{renderCaption(curSentenceIdx);hideSearchIndicator()};
+  // [2026-10-04] 감시자 — canplay/onended/onerror 중 무엇도 안 오는 Chrome 상태에서 재생 체인이
+  // 영원히 멈추는 것을 방지. 정상 종료든 타임아웃이든 딱 한 번만 해제된다.
+  let done=false;
+  const fin=(tag)=>{if(done)return;done=true;_audioFin=null;clearTimeout(canTo);clearTimeout(hardTo);ttsSpeaking=false;if(tag)dbg('재생종료:'+tag);r()};
+  const canTo=setTimeout(()=>{console.warn('재생 시작 감시 발동(8초 무반응) — 다음 문장으로');dbg('⚠ 8초 무반응(디코딩/로드 정체)');fin('8s타임아웃')},8000);
+  const hardTo=setTimeout(()=>{console.warn('재생 최대 시간 초과 — 다음 문장으로');fin('120s상한')},120000);
+  // [2026-10-04 v9] 진행 중인 fin을 밖으로 노출 — 사용자 정지/일시정지 시 onended가 안 오고
+  // 120초 감시자가 혼자 남아 발동하는 고아 타이머 제거(v8 로그 끝의 "재생종료:120s상한"의 정체).
+  _audioFin=fin;
+  audioEl.onended=()=>fin('onended');
+  audioEl.onerror=(e)=>{console.warn('오디오 재생 오류:',audioEl&&audioEl.error);dbg('⚠ 재생오류 code='+(audioEl&&audioEl.error?audioEl.error.code:'?'));fin('onerror')};
+  audioEl.onplay=()=>{dbg('▶ 재생 시작');renderCaption(curSentenceIdx);hideSearchIndicator()};
   // [2026-09-29] src 지정 즉시 play()하면 디코더 초기화 전에 재생이 시작돼 첫 음절이 잘리는
   // 경우가 있었다(느린 PC일수록 잦음). canplay까지 기다린 뒤 재생해 시작 부분 손실을 없앤다.
-  audioEl.oncanplay=()=>{audioEl.play().catch(e=>{console.warn('오디오 재생 차단(자동재생 정책 등):',e.name,e.message);ttsSpeaking=false;r()})};
+  // [2026-10-04 v8] canplay가 오면 8초 감시자 해제 — 이 감시자는 "디코딩 시작 불가" 전용.
+  // v7 버그: 진입 8초 후 무조건 발동해 8초보다 긴 문장을 재생 중에 잘라버렸다(실측: 17~21초
+  // 문장이 전부 8초에 컷 → 말이 사라지고 다음 문장으로 건너뜀). 이후 정체는 120s 상한이 담당.
+  // [2026-10-04 v9] duration 병기 — "의심 짧은 음성"(잘린 생성) 원격 진단용.
+  audioEl.oncanplay=()=>{clearTimeout(canTo);const d=audioEl.duration;dbg('디코딩 완료 → play() ('+(d&&isFinite(d)?d.toFixed(1)+'s':'?')+')');audioEl.play().catch(e=>{console.warn('오디오 재생 차단(자동재생 정책 등):',e.name,e.message);dbg('⚠ 재생 차단:'+e.name+' — 화면 한 번 클릭 후 재시도');fin('차단'+e.name)})};
   audioEl.src=url;
   audioEl.load();
 })}
-function speakFB(text){return new Promise(r=>{try{noteSpoken(text);console.warn('TTS 폴백(브라우저 내장 음성) 사용:',text.slice(0,20));const u=new SpeechSynthesisUtterance(text);u.lang='ko-KR';if(_koVoice)u.voice=_koVoice;u.rate=ttsSpeed;u.onstart=hideSearchIndicator;u.onend=()=>r();u.onerror=()=>r();speechSynthesis.cancel();speechSynthesis.speak(u);ttsSpeaking=true}catch(e){hideSearchIndicator();r()}})}
+let _audioFin=null;  // 진행 중인 playAudio의 fin — pause/stop이 즉시 해제
+function speakFB(text){return new Promise(r=>{try{
+  if(!_koVoice)_koVoice=pickKoreanVoice();  // [2026-10-05] 음성 목록이 늦게 로딩된 경우 여기서 재시도 — 이국 억양 폴백 방지
+  noteSpoken(text);console.warn('TTS 폴백(브라우저 내장 음성) 사용:',text.slice(0,20));dbg('폴백(브라우저 음성): '+text.slice(0,16));autoAnno('TTS 실패 → 브라우저 폴백 전환 — 문장: '+text.slice(0,60));  // [2026-10-04] 음성오류 자동 기록
+  const u=new SpeechSynthesisUtterance(text);u.lang='ko-KR';if(_koVoice)u.voice=_koVoice;u.rate=ttsSpeed;
+  // [2026-10-04] 감시자 — Chrome에서 cancel() 후 speak()가 무시되거나 onend/onerror가 안 오는
+  // 알려진 버그가 있어, 읽기 예상시간+여유 후 강제 해제(재생 체인 사망 방지).
+  let done=false;const fin=()=>{if(done)return;done=true;clearTimeout(fbTo);ttsSpeaking=false;hideSearchIndicator();r()};
+  u.onstart=()=>{hideSearchIndicator()};
+  u.onend=fin;u.onerror=fin;
+  const fbTo=setTimeout(fin,Math.max(2500,text.length/(3.2*ttsSpeed)*1000+4000));
+  speechSynthesis.cancel();speechSynthesis.speak(u);ttsSpeaking=true;
+  setTimeout(()=>{if(!done&&!speechSynthesis.speaking&&!speechSynthesis.pending){try{speechSynthesis.speak(u)}catch(e){}}},200);
+}catch(e){hideSearchIndicator();r()}})}
 async function speak(text){
   if(!text||text.length<2){console.warn('speak: empty text');return}
   noteSpoken(text);
@@ -853,26 +1367,24 @@ function noteSpoken(text){
 // 내용이 겹치고, 새로운 질문이면 안 겹치므로 시간 창을 둘 필요가 없다.
 function isEcho(transcript){
   if(!transcript||transcript.length<3)return false;
-  // [2026-09-29] 발화 맨 앞부분만 비교(고정 위치)하면, STT가 "이전 문장 끝 + 다음 문장 시작"처럼
-  // 문장 경계에 걸친 토막을 인식했을 때(=발표 문장과 실제로는 겹치지만 앞부분이 안 맞음) 놓쳐서
-  // 질문으로 오인되는 경우가 있었다. 최근 발화 몇 개를 합쳐놓고 슬라이딩 윈도우로 비교해 이런
-  // 경계 걸침도 잡아낸다. 단, "질문 있습니다"/"잠깐만요" 같은 짧은 트리거 문구가 발표 문장과
-  // 우연히 몇 글자만 겹쳐 오탐(=응답 없이 무시됨)되는 것을 막기 위해 충분히 긴 발화에만 적용.
+  // [2026-10-05 v9c] 정규화 비교 — STT가 쉼표·띄어쓰기를 스크립트 원문과 다르게 반영하면 원문 8자
+  // 윈도우가 전부 미스로 순수 에코가 통과하고, 뒤에 붙은 발화째로 질문 처리돼 발표가 자기 목소리에
+  // 끊긴다(실측 [i5el] +233.3s: 스크립트 에코+메타 발화가 한 질문으로 LLM에 들어간 사례). 양쪽을
+  // 공백·문장부호 제거 후 비교해 철자 그대로 재구성되는 TTS 에코를 놓치지 않는다.
+  const norm=s=>s.replace(/[\s,.!?~·:;'"()\-]/g,'');
   if(_recentSpoken.length){
-    const combined=_recentSpoken.join(' ');
-    // [2026-09-29] "안녕하십니까"처럼 짧은 문장(<10자) 하나가 통째로 TTS로 나가는 경우 —
-    // 아래 8자 슬라이딩 윈도우는 transcript보다 길어 아예 못 돌아서 에코를 놓쳤다.
-    // 짧은 발화는 윈도우 없이 직접 포함 여부로 확인.
-    if(transcript.length<10){
-      if(combined.includes(transcript)){
+    const combined=norm(_recentSpoken.join(' '));
+    const t=norm(transcript);
+    if(t.length<10){
+      if(combined.includes(t)){
         console.log('에코(내용 일치, 짧은 발화):',transcript);
         return true;
       }
       return false;
     }
     const win=8;
-    for(let i=0;i+win<=transcript.length;i+=4){
-      if(combined.includes(transcript.slice(i,i+win))){
+    for(let i=0;i+win<=t.length;i+=4){
+      if(combined.includes(t.slice(i,i+win))){
         console.log('에코(내용 일치):',transcript.slice(0,20));
         return true;
       }
@@ -881,6 +1393,31 @@ function isEcho(transcript){
   return false;
 }
 
+// [2026-10-05 v9b] 에코 접두 절단 — 발표 음성 꼬리와 질문이 STT에서 한 결과로 합쳐지면("…입니다
+// ssot에 대해서 설명해 줘요") 8자 슬라이딩 에코 판정이 질문째로 묻어버린다(발표 중 질문 접수
+// 실패의 마지막 구멍). 최근 발화에 등장하는 접두부를 최대한 잘라낸 나머지를 돌려준다.
+function stripEchoPrefix(t){
+  // [2026-10-05 v9c] "마지막 에코 윈도우 뒤" 절단 — 최장 접두 방식은 STT가 한 글자만 틀려도(실측:
+  // "유통 등"→"유통된") 그 지점에서 끊겨 스크립트 꼬리가 질문 본문에 잔존했다. 에코 윈도우가
+  // 마지막으로 나온 위치 뒤를 본문으로 삼고, 본문조차 에코로 시작하면 발화 전체를 에코로 판정해 null.
+  if(!_recentSpoken.length)return null;
+  const norm=s=>s.replace(/[\s,.!?~·:;'"()\-]/g,'');
+  const combined=norm(_recentSpoken.join(' '));
+  const n=norm(t);
+  if(n.length<12)return null;
+  let last=-1;
+  for(let i=0;i+8<=n.length;i+=4){if(combined.includes(n.slice(i,i+8)))last=i}
+  if(last<0)return null;
+  const cut=n.slice(last+8);
+  if(!cut||cut.length<4)return null;  // 사실상 순수 에코
+  if(combined.includes(cut.slice(0,8)))return null;  // 본문 시작도 에코 — 질문 인용으로 판단, 폐기(기존 동작 유지)
+  let cnt=0,i=0;const target=last+8;  // 정규화 좌표 → 원문 좌표 복원(글자만 셈 — 공백·문장부호는 건너뜀)
+  while(i<t.length&&cnt<target){if(norm(t[i]))cnt++;i++}
+  const rest=t.slice(i).trim();
+  return rest.length>=4?rest:null;
+}
+
+let _sttLastEvt=Date.now();  // 감시자용 마지막 STT 이벤트 시각
 function startListening(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return;stopListening();recognizer=new SR();recognizer.lang='ko-KR';recognizer.continuous=true;recognizer.interimResults=true;
 // [2026-09-29] 느린/바쁜 PC에서 STT가 가끔 죽는 문제 — 원인 두 가지:
 // 1) onerror 핸들러가 없어서 'audio-capture'/'network' 등 onend가 안 따라올 수 있는
@@ -888,23 +1425,57 @@ function startListening(){const SR=window.SpeechRecognition||window.webkitSpeech
 // 2) onend에서 바로 recognizer.start()를 부르면, 이전 인스턴스 정리가 덜 끝난 상태에서
 //    겹쳐 "already started" 예외가 나고 catch가 조용히 삼켜서 그대로 죽어버림 — 바쁜 PC일수록 잦음.
 recognizer.onerror=(e)=>{
+  _sttLastEvt=Date.now();
   console.warn('STT 오류:',e.error);
-  if(sttActive&&(e.error==='audio-capture'||e.error==='network'||e.error==='service-not-allowed')){
+  if(e.error==='not-allowed'||e.error==='service-not-allowed')dbg('⚠ STT 권한 오류('+e.error+') — 마이크 권한 확인 필요');
+  // [2026-10-05] 'aborted' 추가 — 다른 start()와 충돌로 중단된 뒤 재기동이 안 걸리면 그대로 죽는다
+  if(sttActive&&(e.error==='audio-capture'||e.error==='network'||e.error==='service-not-allowed'||e.error==='aborted')){
     setTimeout(()=>{if(sttActive)try{recognizer.start()}catch(err){console.warn('STT 재시작 실패:',err.message)}},1000);
   }
 };
 recognizer.onresult=e=>{
+  _sttLastEvt=Date.now();  // interim 포함 어떤 결과든 인식기 살아있음의 증거
   for(let i=e.resultIndex;i<e.results.length;i++){
     const r=e.results[i];if(!r.isFinal)continue;
-    const t=r[0].transcript.trim();
+    let t=r[0].transcript.trim();  // [2026-10-05 v9b] let — 에코 접두 절단으로 질문 본문만 남길 수 있음
+    // [2026-10-05] 원격 진단 — 최종 인식분을 서버 dbg로 적립(마이크가 뭘 들었는지 로그로 재구성)
+    dbg('🎙 "'+t.slice(0,30)+'"');
     // [2026-09-29] "네"/"예" 같은 한 글자 긍정 응답이 길이<2 필터에 걸려 통째로 무시되던 문제 — 예외 처리
     if((t.length<2&&!/^(네|예|응|넵|넹)$/.test(t))||isHall(t))continue;
-    const intent=detectIntent(t);
+    let intent=detectIntent(t);  // [2026-10-05] let — TTS 중 배경 의문문 게이트가 'none'으로 전환할 수 있음(const면 TypeError)
     // 에코 방지 — AI 자기 음성 or 쿨다운 중이면 무시. 단, "질문 있습니다"/"잠깐만요" 같은
     // 명시적 인터럽트 트리거는 예외 — AI 발화 도중 끼어들면 STT가 AI 발화 꼬리와 사용자 음성을
     // 한 결과로 합쳐 인식하는 경우가 흔한데, 합쳐진 문장이 길어지면 에코 판정에 걸려 트리거째로
     // 버려짐. 이런 트리거 문구는 평소 발표 스크립트에 나오지 않으므로 에코 검사를 생략해도 안전.
-    if(intent!=='ask'&&intent!=='pause'&&isEcho(t)){console.log('에코 무시:',t.slice(0,20));continue}
+    // [2026-10-05] waiting_question 상태에선 질문 의도 발화를 에코로 버리지 않는다 — "네, 질문해
+    // 주세요" 멘트와 사용자 질문이 STT에서 한 결과로 합쳐진 문장이 에코 판정에 걸려 질문째로
+    // 유실되는 것이 실측 문제("질문을 해도 인식이 안 된다"). 순수 멘트 에코는 intent가
+    // question이 아니므로 기존대로 걸러진다.
+    if(intent!=='ask'&&intent!=='pause'&&intent!=='issue'&&!(qaState==='waiting_question'&&intent==='question')&&isEcho(t)){
+      // [2026-10-05 v9b/c] 에코 접두 절단 — 발표 음성 꼬리와 사용자 발화가 STT에서 한 결과로 합쳐지면
+      //("…설명드리겠습니다 아까 질문한 거 찾아봤어요") 에코 판정이 통째로 묻거나, 게이트 미스 시
+      // 스크립트가 질문 본문에 섞여 LLM 컨텍스트를 오염시킨다(실측 [i5el] 12:57 qa_log). 최근 발화에
+      // 등장하는 접두부를 최대한 잘라내고, 남은 본문으로 인텐트를 다시 매겨 유효한 발화는 구출한다.
+      const rest=t.length>=12?stripEchoPrefix(t):null;
+      if(rest&&rest.length>=4){
+        const ni=detectIntent(rest);
+        if(ni!=='none'){
+          dbg('✂ 에코 접두 제거: "'+rest.slice(0,24)+'" ('+intent+'→'+ni+')');
+          t=rest;intent=ni;
+        }else{
+          console.log('에코 무시:',t.slice(0,20));
+          dbg('🔇 에코 무시: "'+t.slice(0,24)+'"');  // [2026-10-05 v9] 서버 로그 재구성용 적립 — 기존엔 브라우저 콘솔 전용이라 원격 진단 불가
+          continue;
+        }
+      }else{
+        console.log('에코 무시:',t.slice(0,20));
+        dbg('🔇 에코 무시: "'+t.slice(0,24)+'"');
+        continue;
+      }
+    }
+    // [2026-10-05] 문제 기록 명령 — 모든 상태에서 최우선 처리. 발표 흐름(정지/재개/타이머)을
+    // 건드리지 않고 기록만 하고 계속한다.
+    if(intent==='issue'){captureIssue(t);continue}
     // ── qaState별 라우팅 ──
     if(qaState==='waiting_question'){
       if(intent==='ask'||intent==='pause'){scheduleWaitQTimer();continue}  // 이미 대기 중 → 재요청은 무시하되 대기 시간 연장
@@ -916,14 +1487,17 @@ recognizer.onresult=e=>{
     }
     if(qaState==='confirming'){
       clearTimeout(_confirmTimer);
+      // [2026-10-05] "그만하세요/마쳐주세요" — 확인 질문에 대한 '종료' 의사. 기존엔 패턴이 없어
+      // 애매한 발화 취급으로 8초 뒤 억지로 발표가 이어졌다. 바로 종료 처리.
+      if(/^(그만|끝내|마치|종료)/.test(t)){qaState='idle';finishPresentation();return}
       // 확인 대신 곧바로 다음 질문을 하는 경우(가장 흔한 실제 패턴) — 그대로 답변 흐름으로 연결
       if(intent==='question'||intent==='ask'||intent==='intent'){
         qaState='answering';handleInterruption(t);return;
       }
       if(/아니|아뇨|더|추가|부족|다시|하나\s*더|질문\s*있/.test(t)){
         qaState='waiting_question';
-        speakUnified('네, 말씀해 주세요.');
-        scheduleWaitQTimer();
+        // [2026-10-05] 타이머는 멘트 재생 후부터
+        speakUnified('말씀해 주세요.').then(()=>{if(qaState==='waiting_question')scheduleWaitQTimer()});
         return;
       }
       if(POSITIVE_RE.test(t)){
@@ -932,8 +1506,46 @@ recognizer.onresult=e=>{
         else{finishPresentation()}
         return;
       }
+      // [2026-10-05 v9c] 실질 발화 질문 흡수 — 실측 [i5el] +80.2s: "발란티어에 대해서 들어 봤어요"가
+      // 의문 어미 부재로 intent='none' → "애매한 발화" 8초 연장 뒤 유실, 발표만 재개(이후 불만 폭발로
+      // 이어진 촉발점). "다른 질문 없으시면?" 직후의 응답 자리니 재개·긍정·거절 계열이 아닌 8자+
+      // 발화는 질문으로 본다(이 상태에 도달한 발화는 이미 에코 게이트를 통과했다).
+      if(RESUME_RE.test(t)){qaState='idle';resumeFromInterrupted();return}
+      if(t.length>=8){qaState='answering';handleInterruption(t);return}
       // 애매한 발화 — 재촉하지 않고 응답 시간을 좀 더 준다
       scheduleConfirmTimer();
+      return;
+    }
+    // ── [2026-10-05 v6] 지연 답변 제안 대기 — "답변 드리고 다음 진행할까요?"에 대한 응답 라우팅 ──
+    if(qaState==='deferring'){
+      if(intent==='pause'){  // "잠깐만요" — 제안 보류하고 일시정지 흐름으로
+        resolveDeferred(false);
+        if(audioEl){audioEl.pause();audioEl=null}
+        try{speechSynthesis.cancel()}catch(e){}
+        ttsSpeaking=false;interrupted=true;
+        document.getElementById('qaBox').textContent='⏸ 일시정지';
+        setStatus('⏸ 일시정지 — 질문 있으신가요?');
+        qaState='waiting_question';
+        speakUnified('질문 있으신가요?').then(()=>{if(qaState==='waiting_question')scheduleWaitQTimer()});
+        return;
+      }
+      if(intent==='question'||intent==='ask'||intent==='intent'){  // 동의 대신 새 질문 — 질문 흐름이 우선
+        resolveDeferred(false);qaState='answering';handleInterruption(t);return;
+      }
+      // 거절·보류 — "괜찮아요/없어요/다음 진행해주세요" 등. POSITIVE_RE의 '없·괜찮·됐'은 이 질문에선
+      // 거절 의미이므로 전용 패턴을 쓴다(동의는 엄격하게 문두 긍정만 인정).
+      if(/아니|아뇨|괜찮|없|됐|다음|진행|스킵|패스|나중/.test(t)){
+        qaState='idle';resolveDeferred(false);
+        document.getElementById('qaBox').style.display='none';
+        setStatus('▶ 다음으로 진행');
+        return;
+      }
+      if(/^(네|예|넵|넹|응|좋아|좋아요|그래|그래요|맞아|드려|들려|궁금)/.test(t)){
+        qaState='answering';resolveDeferred(true);return;  // 답변 재생은 슬라이드 체인이 이어서
+      }
+      // [2026-10-05 v9c] 동의/거절 어미 없는 실질 발화는 새 질문으로 — 8초 연장 뒤 유실 방지
+      if(t.length>=8){resolveDeferred(false);qaState='answering';handleInterruption(t);return}
+      scheduleDeferTimer();  // 애매한 발화 — 응답 시간을 좀 더 준다
       return;
     }
     // ── 발표 후 Q&A 시간 (마지막 슬라이드 완료 후) ──
@@ -946,8 +1558,8 @@ recognizer.onresult=e=>{
       // "질문 있습니다" 류 짧은 예고 — 실제 질문은 다음 발화로 받는다(같은 closing_qa 상태 유지,
       // handleInterruption을 거치면 그쪽의 "네 질문해주세요" 멘트와 겹쳐 어색해지므로 여기서 직접 처리)
       if(intent==='ask'&&t.length<=15){
-        speakUnified('네, 말씀해 주세요.');
-        _closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},8000);
+        // [2026-10-05] 종료 타이머도 멘트 재생 후부터
+        speakUnified('말씀해 주세요.').then(()=>{_closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},8000)});
         return;
       }
       if(intent==='question'||intent==='intent'||t.length>10){
@@ -979,6 +1591,17 @@ recognizer.onresult=e=>{
       scheduleContinueSilenceTimer();
       return;
     }
+    // ── [2026-10-05 v9] 답변 재생 중 발화 유실 방지 — 실측 [i5c0]: 직전 질문("질문 안 받나요")의
+    // 답변 음성이 나오는 동안 도착한 "ssot에 대해서 설명해 줘요"가 아래 `!playing||interrupted`
+    // 게이트에서 무조건 버려졌다(로그에 흔적조차 없음). "질문을 받지 않고 진행한다"는 체감의
+    // 주범. 질문성 발화는 대기열(_pendingQ)에 적재하고, 답변 흐름의 마무리 지점에서 이어받는다.
+    if(qaState==='answering'&&interrupted){
+      if(intent==='pause')return;  // 정지 버튼 사용 유도 — 답변 재생 체인에 세대 가드가 없어 즉시정지는 보류
+      if((intent==='question'||intent==='ask'||intent==='intent'||t.length>10)&&t.length>=4){
+        _pendingQ=t;dbg('📥 답변 중 질문 접수 — 현재 답변 후 이어서: "'+t.slice(0,24)+'"');
+      }
+      return;
+    }
     if(!playing||interrupted)return;
     // ── 발표 중 인텐트 처리 ──
     if(intent==='pause'){
@@ -989,9 +1612,9 @@ recognizer.onresult=e=>{
       document.getElementById('qaBox').style.display='block';
       document.getElementById('qaBox').textContent='⏸ 일시정지';
       setStatus('⏸ 일시정지 — 질문 있으신가요?');
-      speakUnified('네, 질문 있으신가요?');
       qaState='waiting_question';
-      scheduleWaitQTimer();
+      // [2026-10-05] 타이머는 멘트 재생 후부터 (ask 경로와 동일 — 재생 지연 시 창이 사라지던 문제)
+      speakUnified('질문 있으신가요?').then(()=>{if(qaState==='waiting_question')scheduleWaitQTimer()});
       return;
     }
     if(intent==='ask'){
@@ -1001,6 +1624,10 @@ recognizer.onresult=e=>{
       ttsSpeaking=false;interrupted=true;
       handleInterruption(t);return;
     }
+    // [2026-10-05] TTS 발화 중 짧은 무질서 의문문 게이트 — 배경 대화("밥 먹었어?" 등)가 물음표
+    // 하나로 발표를 끊는 것 방지. 질문어가 전혀 없는 10자 미만 의문문은 배경 소음으로 간주해
+    // 기존 지속 대화 감지(10초 내 3회)로 넘긴다. 명시적 질문어("왜","무엇","알려줘"…)은 통과.
+    if(ttsSpeaking&&intent==='question'&&t.length<10&&!/(어떻|왜|무엇|뭐|누가|언제|어디|어느|몇|얼마|무슨|어떤|궁금|알려|설명|질문)/.test(t))intent='none';
     if(intent==='question'||intent==='intent'){
       // 직접 질문 또는 기타 인텐트 → 즉시 인터럽트+답변
       if(audioEl){audioEl.pause();audioEl=null}
@@ -1015,45 +1642,271 @@ recognizer.onresult=e=>{
       if(_bgTalkTimes.length>=BG_TALK_THRESHOLD){_bgTalkTimes=[];pauseForBackgroundTalk()}
     }
   }
-};recognizer.onend=()=>{if(sttActive){setTimeout(()=>{if(sttActive)try{recognizer.start()}catch(e){console.warn('STT 재시작 실패:',e.message)}},250)}};try{recognizer.start();sttActive=true}catch(e){console.warn('STT 시작 실패:',e.message)}}
+};recognizer.onend=()=>{_sttLastEvt=Date.now();if(sttActive){setTimeout(()=>{if(sttActive)try{recognizer.start()}catch(e){console.warn('STT 재시작 실패:',e.message)}},250)}};try{recognizer.start();sttActive=true}catch(e){console.warn('STT 시작 실패:',e.message)}}
 function stopListening(){sttActive=false;if(recognizer){try{recognizer.stop()}catch(e){}recognizer=null}}
+// [2026-10-05] STT 침묵 감시자 — Chrome 연속 인식이 onend/onerror 없이 조용히 죽는 경우가 있고
+// 그 동안 사용자가 "질문있다"를 말해도 아무 일도 안 일어난다(실측: 발표 재개 후 재질문 무반응).
+// 12초간 어떤 이벤트도 없으면 인식기를 새로 기동해 스스로 회복한다.
+setInterval(()=>{
+  if(!sttActive||!recognizer)return;
+  if(Date.now()-_sttLastEvt<12000)return;
+  _sttLastEvt=Date.now();
+  dbg('⚠ STT 감시 — 12초 무이벤트, 인식기 강제 재기동');
+  startListening();
+},3000);
 
 // ── Q&A 멀티에이전트 오케스트레이션 v2 ──
 // 핵심: 추임새는 브라우저 TTS(0초 즉시)로, 실제 답변만 OpenAI TTS(고품질)로.
 // 추임새가 네트워크 왕복(2~5초) 때문에 침묵 후 나오던 문제를 원천 해결.
-let _fillerIdx=0;
-const FILLERS=[
-  q=>'좋은 질문입니다. '+shorten(q)+'에 대한 내용이 맞을까요? 잠시 확인해 보겠습니다.',
-  q=>'아, 이해했습니다. '+shorten(q)+'에 대해 말씀하시는 거군요. 관련 자료를 찾아볼게요.',
-  q=>'네, 좋은 포인트입니다. '+shorten(q)+' 관련해서 잠시 생각해 보겠습니다.',
-  q=>'말씀하신 질문이 '+shorten(q)+' 맞을까요? 아, 네. 잠시 확인하겠습니다.',
-];
-function shorten(q){const t=q.replace(/[?.!]/g,'').trim();return t.length>25?t.slice(0,25)+'… 관련':t+' 관련'}
-function nextFiller(q){const f=FILLERS[_fillerIdx++%FILLERS.length];return f(q)}
-// 질문이 명확히 인식됐을 때(=detectIntent==='question')는 질문을 되풀이해 확인하지 않고 바로 답변 준비로 넘어감
+// [2026-10-05 v3] 동적 되묻기 추임새("좋은 질문입니다. X에 대한 내용이 맞을까요? …") 폐지 —
+// 질문문을 인용하는 순간 프리캐시가 불가능하고, 실측 [b0tm]에서 GPU 경합 6초 예산 미스로
+// 침묵의 한 축이 됐다. 전부 정적 프리캐시 추임새로 통일(PLAIN_FILLERS).
 let _plainFillerIdx=0;
-const PLAIN_FILLERS=['네, 답변 드리겠습니다.','네, 확인해 보겠습니다.','알겠습니다, 잠시만요.','네, 바로 답변 드릴게요.'];
+const PLAIN_FILLERS=['답변 드리겠습니다.','확인해 보겠습니다.','알겠습니다, 잠시만요.','바로 답변 드릴게요.'];  // [2026-10-05] "네," 접두 제거 — CACHED_PHRASES와 동일 사유(조기 EOS)
 function nextPlainFiller(){return PLAIN_FILLERS[_plainFillerIdx++%PLAIN_FILLERS.length]}
 
-async function generateAnswer(q){
+async function generateAnswer(q,ragPromise,stats){
   const s=slides[curSlideIdx];
-  let ctx='당신은 발표 중입니다. 청중이 질문했습니다. 간결하고 명확하게 답하세요(2~3문장).\n[슬라이드] '+(s?s.title:'')+'\n[발표 중 문장] '+(sentences[curSentenceIdx]||'')+'\n[질문] '+q;
+  // [2026-10-05 v2] 센티널 강제 — 실측(발표 [b0tm] 후속): "답하거나 ~로 마무리"식 이중 지시는
+  // LLM이 허구 답변과 면책 멘트를 '둘 다' 출력하게 만든다(RBAC 질문에 엉뚱한 답+발표 후 안내).
+  // 또한 이 임베딩은 점수로 관련성 구분이 불가능(실측: SSOT 정답 질문 0.376 vs RBAC 무관 질문 0.374,
+  // 덱에 있는 임직원 수 질문은 0.283) → 클라이언트 점수 게이트 대신 LLM 자판단+하드 토큰으로 판정하고,
+  // 토큰이 오면 정직 거절 멘트로 교체한다. 거절 문구는 LLM이 만들지 않는다(클라이언트 상수).
+  let ctx='당신은 발표 중입니다. 청중이 질문했습니다. [참고 자료]·[슬라이드]·[발표 중 문장]에 근거가 있는 내용만 간결하게 답하세요(2~3문장). 근거가 없는 내용(수치·일정·용어 정의·외부 지식)은 절대 지어내지 말고, 답할 수 없으면 다른 말 없이 정확히 '+NO_ANSWER_TOKEN+' 토큰만 출력하세요.\n[슬라이드] '+(s?s.title:'')+'\n[발표 중 문장] '+(sentences[curSentenceIdx]||'')+'\n[질문] '+q;
+  let _hasRefs=false;
   if(ragEnabled&&refDocs.length){
-    try{const refs=await searchRef(q,3);if(refs.length)ctx+='\n[참고 자료]\n'+refs.map((r,i)=>(i+1)+'. '+r.text.slice(0,300)).join('\n')}catch(e){}
+    try{
+      // [2026-10-05] 검색은 질문 접수 즉시 시작된 ragPromise를 기다린다(추임새 재생과 병렬).
+      // 단 예산(RAG_BUDGET_MS) 초과 시 참고자료 없이 진행 — "검색하느라 답변이 안 나오는" 실측
+      // 지연을 끊는다. 초과 여부는 stats.ragTimeout으로 기록해 폐루프에서 회귀 추적.
+      const _rt0=Date.now();
+      const refs=await Promise.race([ragPromise||searchRef(q,3),new Promise(r=>setTimeout(()=>r(null),RAG_BUDGET_MS))]);
+      if(refs===null){if(stats){stats.ragTimeout=true;stats.ragMs=Date.now()-_rt0}}
+      else{
+        if(stats)stats.ragMs=Date.now()-_rt0;
+        if(refs.length){
+          // [2026-10-05] 자동 습득 지식은 출처를 명시 — 센티널 지시(단일)는 그대로 두고 인라인 태그로만
+          // 신중 판단을 유도한다(지시 문장 추가는 이중 지시 회귀 위험이 있어 금지).
+          ctx+='\n[참고 자료]\n'+refs.map((r,i)=>(i+1)+'. '+(r.origin==='auto'?'(자동 학습·검증 전) ':'')+r.text.slice(0,300)).join('\n');
+          if(stats){stats.ragRefs=refs.length;stats.ragTop=+(refs[0].score||0).toFixed(3);if(refs.some(r=>r.origin==='auto'))stats.ragAuto=true}
+          _hasRefs=true;
+        }
+      }
+    }catch(e){if(stats)stats.errors.push('rag:'+((e&&e.message)||'').slice(0,60))}
+    // [2026-10-05 v2] RAG 미스 정직 거절 — 참고자료가 아예 없으면(검색 실패·예산 초과 포함)
+    // LLM을 아예 돌리지 않고 한계를 밝힌다(사용자 지시). 참조가 '있어도' 무관한 청크일 수 있어서
+    // (점수 분리 불가 실측) 그 판정은 위 센티널 지시로 LLM에 맡기고, 토큰이 나오면 아래에서 교체.
+    if(!_hasRefs){
+      if(stats){stats.ragMiss=true;stats.engine='rag-miss'}
+      return RAG_MISS_MSG;
+    }
   }
-  let ans='';
+  let ans='',engine='';
   if(scriptEngine==='openai'){
-    try{const r=await fetch(OPENAI_SCRIPT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));ans=(j.content||'').trim()}catch(e){}
+    const _t0=Date.now();
+    try{const r=await fetch(OPENAI_SCRIPT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));ans=(j.content||'').trim();if(ans)engine='openai-script'}catch(e){if(stats)stats.errors.push('script:'+((e&&e.message)||'').slice(0,40))}
+    if(stats)stats.scriptMs=Date.now()-_t0;
   }
   if(!ans){
-    try{const r=await fetch(LOCAL_LLM,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'qwen3:14b',messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));ans=(j.message&&j.message.content||'').trim()}catch(e){}
+    const _t0=Date.now();
+    try{const r=await fetch(LOCAL_LLM,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));ans=(j.message&&j.message.content||'').trim();if(ans)engine='local-llm'}catch(e){if(stats)stats.errors.push('llm:'+((e&&e.message)||'').slice(0,40))}
+    if(stats)stats.llmMs=Date.now()-_t0;
   }
   if(!ans)ans='죄송합니다, 발표 후 더 자세히 답변드리겠습니다.';
+  // [2026-10-05 v2] 센티널 판정 — LLM이 근거 없음을 토큰으로 선언하면 정직 거절 멘트로 교체.
+  // 참조 점수로는 관련/무관 구분이 불가(0.376 vs 0.374 실측)하므로 이 판정이 거절의 본대.
+  if(ans.includes(NO_ANSWER_TOKEN)){
+    if(stats){stats.ragMiss=true;stats.engine='rag-miss'}
+    return RAG_MISS_MSG;
+  }
   if(HANJA.test(ans))ans=ans.replace(/[一-鿿]+/g,'');
+  if(stats){stats.engine=engine;stats.answerChars=ans.length}
   return ans;
 }
 
+// ── Q&A 품질 폐루프 로그 [2026-10-05] — 질문-답변 이벤트(검색/LLM/TTS 시간, 폴백, 추임새 횟수)를
+// 서버 /api/qa-log로 보내 eval/qa_log.jsonl에 적재. 배터리와 함께 회귀를 추적한다.
+const _qaLogEvents=[];
+function qaLog(type,data){try{if(type==='tts_slow')_ttsSlowTotal++;if(type==='issue')_issueTotal++;_qaLogEvents.push(Object.assign({type,ts:Date.now()},data||{}))}catch(e){}}
+function qaFlushLog(extra){
+  try{
+    const events=_qaLogEvents.splice(0,_qaLogEvents.length);
+    const payload=Object.assign({events},extra||{});
+    fetch('/ppt-agent/api/qa-log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),keepalive:true}).catch(()=>{});
+  }catch(e){}
+}
+const QA_TTS_WAIT_MS=6000;   // Q&A 멘트가 설정 음성 생성을 기다리는 상한 — 초과 시 텍스트 대체. [2026-10-05] 4s→6s: 큐 선두 점프해도 인플라이트 문장+GPU 경합을 감안한 여유(문구는 이제 0.5s 생성)
+const RAG_BUDGET_MS=2500;    // RAG 검색 예산 — 초과 시 참고자료 없이 답변(속도 우선, 로그로 추적)
+const ANSWER_TTS_WAIT_MS=20000;  // [2026-10-05] 15s→20s — 실측 +391.5s에서 후속 문장 생성 19.9s로 15s 예산 5초 차이 초과. 영어 토큰 제거(koNizeTts)로 생성 단축이 기대되지만 헤드룸 확보  // 답변 음성 대기 예산 — 무경합 생성은 186자≈3~5s(실측). 초과 시 텍스트 진행
+let _ttsSlowTotal=0,_issueTotal=0;  // 세션 누계 — 발표 종료 시 session_end 기록에 들어간다
+
+// [2026-10-05] 사용자 음성 문제 기록 — "문제 기록 + 설명" 한 발화로 폐루프 가동.
+// 발표 상태를 건드리지 않고(정지·재개·타이머 불변) 컨텍스트(상태·슬라이드·문장·누적 통계)와
+// 함께 기록한다. 서버가 state='issue'를 eval/issues.jsonl에 적어 다음 개선 세션의 입력으로 쓴다.
+function captureIssue(q){
+  qaLog('issue',{utterance:String(q).slice(0,200),state:qaState,
+    slide:(curSlideIdx+1)+'/'+slides.length,sentence:(curSentenceIdx+1)+'/'+(sentences.length||0)});
+  qaFlushLog({state:'issue',q:String(q).slice(0,300)});
+  dbg('📝 문제 기록: '+String(q).slice(0,40));
+  if(ttsSpeaking){setStatus('📝 문제 기록 완료 — 계속 진행합니다')}  // 발표 음성 진행 중 — 끊지 않고 표시만
+  else{speakUnified('문제를 기록했습니다.').then(()=>{setStatus('📝 문제 기록 완료')})}
+}
+
+// ── 지식 자동 습득 + 지연 답변 [2026-10-05 v6, 사용자 지정 시나리오] ──
+// rag-miss → 짧은 거절 통보 후 즉시 발표 재개하고, 배경에서 클라우드 답변+자동 임베딩을 진행한다
+// (requestKnowledgeAcquire). 이후 25초 간격으로 searchRef 재확인해 auto 지식이 보이면 답변 텍스트를
+// 미리 생성해 'ready'로 전환 — 현재 슬라이드 설명이 끝나는 지점(playSentenceStream 슬라이드 종료 훅)에서
+// "조금 전 질문하신 내용 답변 드리고 진행할까요?"로 동의를 얻어 답변한 뒤 다음 진행을 이어간다.
+// 기존의 "다시 질문해 주세요" 즉석 안내는 이 제안 방식으로 대체(청중 앞 재요청 부담 제거).
+const KNOWLEDGE_RECHECK_MS=25000;  // 재확인 폴링 간격 — 클라우드 답변+임베딩 왕복(수 초~수십 초) 감안
+const DEFER_MAX_TRIES=8;           // 25s×8≈3분 20초 — 이 안에 습득 미확인이면 제안 조용히 취소
+let _knowRecheckTimer=null,_deferQA=null,_deferTimer=null,_deferResolve=null;
+function startDeferredQA(q){
+  clearTimeout(_knowRecheckTimer);
+  _deferQA={q:String(q).slice(0,300),status:'acquiring',tries:0,answer:null,started:Date.now()};
+  deferRecheck();
+}
+async function deferRecheck(){
+  const d=_deferQA;if(!d||d.status!=='acquiring')return;
+  d.tries++;
+  try{
+    if(ragEnabled&&refDocs.length){
+      const refs=await searchRef(d.q,1);
+      if(refs&&refs.length&&refs[0].origin==='auto'){
+        d.status='answering';  // 루프 재스케줄 차단 — 답변 텍스트 생성 중
+        dbg('🧠 자동 습득 확인 — 답변 생성 시작');
+        const _st={errors:[]};
+        const _a=await generateAnswer(d.q,searchRef(d.q,3).catch(()=>[]),_st).catch(()=>null);
+        if(_a&&!_a.includes(NO_ANSWER_TOKEN)){
+          d.answer=_a;
+          if(qaState==='closing_qa'){  // 발표 종료 후 Q&A 중 완성 — 슬라이드 훅이 없으니 즉시 제공
+            d.status='asked';
+            dbg('🧠 지연 답변 — Q&A 시간에 즉시 제공');
+            speakUnified(offerText(d.q)).catch(()=>{}).then(()=>speakQaAnswer(_a).catch(()=>{}));
+          }else{
+            d.status='ready';
+            // [2026-10-05 v6.1] 제안 멘트를 ready 시점에 즉시 프리생성 — "발표를 잠시 멈추고" 물어야
+            // 하므로 다음 문장 경계(수 초 내)까지 완성돼 있어야 한다. 동적 문장(질문 내용 포함)이라
+            // 이 시점 개별 생성, 큐 꼬리(발표 프리페치 뒤)라 재생에는 영향 없다.
+            enqueueTts(offerText(d.q),false,'prefetch').catch(()=>{});
+            setStatus('🧠 아까 질문의 답변 준비 완료 — 잠시 후 말씀드리겠습니다');
+            dbg('🧠 지연 답변 준비 완료 — 다음 문장 경계에서 일시정지·제안');
+          }
+        }else{d.status='expired';d.answer=null;dbg('⚠ 습득 확인됐으나 답변 생성 실패 — 제안 취소')}
+      }
+    }
+  }catch(e){}
+  if(_deferQA&&_deferQA.status==='acquiring'){
+    if(_deferQA.tries>=DEFER_MAX_TRIES){_deferQA.status='expired';dbg('⚠ 지식 자동 습득 미확인('+(DEFER_MAX_TRIES*KNOWLEDGE_RECHECK_MS/1000)+'초) — 제안 조용히 취소');return}
+    _knowRecheckTimer=setTimeout(deferRecheck,KNOWLEDGE_RECHECK_MS);
+  }
+}
+// [2026-10-05 v6.1] 제안 멘트에 질문 내용을 담는다 — "조금 전에 질문하신 OOO에 대하여 답변 드려도
+// 될까요?"(사용자 지정). 질문은 첫 문장만, 30자로 잘라 TTS 친화적으로 정리.
+function offerText(q){
+  let s=String(q||'').replace(/\s+/g,' ').replace(/["'“”‘’]/g,'').trim();
+  s=(s.split(/[.!?…]/)[0]||s).trim().slice(0,30).trim();
+  if(!s)s='아까 질문';
+  return '조금 전에 질문하신 '+s+'에 대하여 답변 드려도 될까요?';
+}
+// 발표 도중(다음 문장 경계)에서 호출 — 동의("네")면 true, 거절·무응답(8초)이면 false로 귀결
+function offerDeferredAnswer(){
+  const d=_deferQA;if(!d||d.status!=='ready')return Promise.resolve(false);
+  d.status='asked';
+  const qb=document.getElementById('qaBox');qb.style.display='block';qb.textContent='💬 대기 중인 질문: '+d.q.slice(0,80);
+  return new Promise(resolve=>{
+    _deferResolve=resolve;
+    qaState='deferring';
+    setStatus('💬 답변 제안 — "네" 또는 "다음으로"');
+    speakUnified(offerText(d.q)).then(()=>{
+      clearTimeout(_deferTimer);
+      _deferTimer=setTimeout(()=>{if(qaState==='deferring'){qaState='idle';resolveDeferred(false);dbg('⏱ 답변 제안 무응답 — 다음 진행')}},8000);
+    });
+  });
+}
+function resolveDeferred(v){
+  clearTimeout(_deferTimer);
+  const r=_deferResolve;_deferResolve=null;
+  if(r)try{r(v)}catch(e){}
+}
+// [2026-10-05 v9d] 습득 품질 게이트 — 실측 오염 2건(#7 불만 원문 "왜 대답 안 하죠", #8 STT 잡음
+// "무슨 얘기를 왜 벌써 울고 있어")이 그대로 임베딩됐고, /api/search는 신뢰도를 랭킹에 반영하지 않아
+// 쓰레기 청크가 정상 지식과 동등 경쟁했다(둘 다 conf 0.3으로 시스템도 불확실했다). 발표장 질문은
+// 존댓말 어미(요/까요/세요/습니다)이거나 영문 용어를 포함하는 게 일반적 — 둘 다 아니면 영구 지식화만
+// 보류한다(답변 시도·거절 통보·폐루프 적재는 그대로 진행되고, 습득은 🧠 탭에서 수동 가능).
+function acquireWorthy(q){
+  const s=String(q||'').trim();
+  if(!s)return false;
+  if(/(요|까|습니다)\s*[.?!]?\s*$/.test(s))return true;   // 존댓말 어미
+  if(/[a-zA-Z]{2,}/.test(s))return true;                  // 영문 용어(ssot, rbac, jev…)
+  return false;
+}
+function requestKnowledgeAcquire(q){
+  try{
+    fetch('/ppt-agent/api/knowledge/acquire',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({q:String(q).slice(0,300),context:(slides[curSlideIdx]||{}).title||''})}).catch(()=>{});
+    dbg('🧠 지식 자동 습득 요청: '+String(q).slice(0,40));
+  }catch(e){}
+}
+
+// [2026-10-05] 답변 음성 — 설정 음성만 사용. 생성 실패 시 브라우저 다른 음성으로 폴백하지 않고
+// 화면 텍스트로 대체한다(답변 본문은 이미 qaBox에 표시돼 있다). "3가지 음성 혼재" 문제의 마무리.
+// [2026-10-05 v2] 실발표 고장(03:21 로그) — ttsSentence '직접' 호출이 직렬 큐를 우회해 프리페치
+// 인플라이트와 동시 요청 → mlx GPU 경합 runaway(49~96s) → 60s 타임아웃. 큐 '선두'로 직렬화 회복.
+// [2026-10-05 v3] 실발표 고장(03:40 로그) — 139자 '통짜' 요청(361KB, 10.1s, GPU 독점 확인)의
+// 발음이 흐리고 억양이 흘러 외국인 발음처럼 들렸다. 같은 엔진·같은 보이스의 '짧은' 추임새와
+// 문장 단위 생성인 발표 본문은 항상 깨끗했다 → mlx CustomVoice 모델의 장문 드리프트.
+// 답변도 발표 본문과 동일한 scriptToSentences 문장 분할 경로로: 첫 문장은 큐 선두+대기 예산,
+// 이후 문장은 앞 문장 재생 중 병렬 생성해 이어서 재생.
+async function speakQaAnswer(text){
+  const _t0=Date.now();
+  const parts=scriptToSentences(text).map(p=>p.t);
+  if(!parts.length)parts.push(text);
+  // [2026-10-05 v7] 후속 문장을 첫 문장 '대기 전'에 적재 — 첫 문장이 확률적 생성 지연(동일 문장
+  // 2.3s vs 10.1s 실측 grind)에 빠져도 2번째 이후 생성이 바로 이어지도록 파이프라인을 먼저 당긴다.
+  // 기존엔 첫 문장 확정 후 적재해 첫 문장이 늦으면 후속 전부가 연쇄 지연됐다. 선두 삽입 역순 적재라
+  // 큐 순서는 [1,2,3,…] 유지.
+  const pend=[];
+  for(let i=parts.length-1;i>=1;i--)pend.push(enqueueTts(parts[i],true,'qa').catch(()=>null));
+  // [2026-10-05 v7] 첫 문장 침묵 완화 — 생성 첫 바이트는 완성 시점에만 도착(스트리밍 컷 불가 확인)하므로
+  // 클라이언트에서 커버한다: 2.5초 내 미완성이면 프리캐시 브리지 멘트로 침묵을 메우고, 총 예산(20s) 내
+  // 계속 대기. 실측 grind(10~13s)도 브리지+후속 파이프라인으로 답변 시작이 들린다.
+  let first=await Promise.race([enqueueTts(parts[0],true,'qa').catch(()=>null),
+    new Promise(r=>setTimeout(()=>r(null),2500))]);
+  let bridge=false;
+  if(!first){
+    bridge=true;
+    dbg('⏳ 답변 첫 문장 지연 — 브리지 멘트로 침묵 메움');
+    await speakUnified('바로 답변 드릴게요.').catch(()=>{});
+    first=await Promise.race([enqueueTts(parts[0],true,'qa').catch(()=>null),
+      new Promise(r=>setTimeout(()=>r(null),ANSWER_TTS_WAIT_MS))]);
+  }
+  qaLog('answer_tts',{ms:Date.now()-_t0,ok:!!first,wait_timeout:!first,bridge:bridge,parts:parts.length,chars:(text||'').length});
+  if(!first){
+    // [2026-10-05 v5] 타임아웃 시 잔여 답변 조각을 큐에서 폐기 — 실측 [b0tm]에서 첫 조각이
+    // 슬라이드 몬스터(42.5s 생성) 뒤에 막혀 20s 초과. 폐기 없으면 남은 조각들이 나중에 GPU를
+    // 낭비하고 재개된 발표 도중 유령 재생될 수 있다. 인플라이트 1건은 중단 불가 — 완료돼도
+    // 소비자(race 포기)가 없어 재생되진 않는다. 안내 멘트는 프리캐시라 경합 중에도 즉시 나간다.
+    const purged=purgePrefetchTts('qa');
+    dbg('⚠ 답변 음성 '+(ANSWER_TTS_WAIT_MS/1000)+'초 내 미완성 — 화면 텍스트로 대체(브라우저 음성 미사용)'+(purged?' — 잔여 조각 '+purged+'건 폐기':''));
+    setStatus('💬 답변은 화면에 표시했습니다');
+    speakUnified('답변은 화면에 표시되어 있습니다.').catch(()=>{});
+    return false;
+  }
+  // 후속 문장은 위에서 이미 적재(v7) — 여기선 재생만
+  let cur=first;
+  await playAudio(cur);
+  for(const p of pend){
+    cur=await Promise.race([p,new Promise(r=>setTimeout(()=>r(null),ANSWER_TTS_WAIT_MS))]);
+    if(!cur){dbg('⚠ 답변 후속 문장 생성 지연 — 남은 분은 화면 텍스트로 대체');purgePrefetchTts('qa');return false}
+    await new Promise(r=>setTimeout(r,250));  // 문장 경계 호흡 — 발표 본문의 짧은 쉼(200ms)과 동일하게
+    await playAudio(cur);
+  }
+  return true;
+}
+
 async function handleInterruption(q,fromClosing){
+  const gen=++_qaGen;  // [2026-10-05 v9] 세대 가드 — 새 인터럽트/정지가 오면 낡은 인스턴스의 상태 기록을 막는다
   // ── 0ms: 즉시 음성 정지 ──
   interrupted=true;
   if(audioEl){audioEl.pause();audioEl=null}
@@ -1061,60 +1914,189 @@ async function handleInterruption(q,fromClosing){
   ttsSpeaking=false;
   const qa=document.getElementById('qaBox');qa.style.display='block';
 
-  // "질문 있습니다" 류 → 브라우저 TTS로 즉시 응답 (0초)
-  if(detectIntent(q)==='ask'){
-    qa.textContent='💬 질문을 기다리고 있습니다…';
+  // [2026-10-05 v9c] 메타 질문 재링크 — "아까 질문한 거 찾아봤어요?"는 질문 본문이 아니라 직전
+  // 질문의 재요청이다. 실측([i5el] 12:57 qa_log): 스크립트 에코+메타 발화가 통으로 LLM에 들어가
+  // 헛답변으로 이어졌다. 직전 실질 질문으로 본문을 갈아끼워 맥락을 복원한다.
+  if(/(아까|방금|조금\s*전|금방).{0,8}(질문|물어|얘기)|질문한\s*거|그\s*질문/.test(q)&&_lastQ&&_lastQ!==q){
+    dbg('🔗 메타 질문 재링크: "'+q.slice(0,20)+'" → "'+_lastQ.slice(0,24)+'"');
+    q=_lastQ;
+  }
+  // [2026-10-05 v9e] 지연 답변 상태 문의 — "아까 물어봤는데 답 찾았어요?"류는 질문 본문이 아니라
+  // 상태 확인이다. 실측([681h] +699s): 상태 문의가 rag-miss → 중간 멘트("먼저 발표를 진행하고…")
+  // + 상태 문의 텍스트의 지식 습득까지 가서 이중 오염. 질문으로 처리하지 말고 실제 상태로 답한다.
+  if(/(아까|방금|조금\s*전|중간에).{0,24}(물어봤|질문했|물었|여쭤봤).{0,28}(찾았|찾으셨|답변|됐|있나|없나)/.test(q)&&!/찾아\s*(설명|드려|줘|봐)/.test(q)){
+    const _d=_deferQA;
+    dbg('🧭 지연 답변 상태 문의 — status='+(_d?_d.status:'없음'));
+    if(_d&&_d.status==='ready'){offerDeferredAnswer().catch(()=>{});return}
+    if(_d&&(_d.status==='acquiring'||_d.status==='answering')){
+      await speakUnified('아직 관련 지식을 찾고 있습니다. 찾는 대로 말씀드리겠습니다.');
+      if(gen!==_qaGen)return;
+    }else{
+      await speakUnified('죄송합니다. 아까 질문하신 내용은 관련 지식을 찾지 못했습니다.');
+      if(gen!==_qaGen)return;
+    }
+    if(fromClosing){qaState='closing_qa';setStatus('💬 더 질문 있으신가요?');
+      clearTimeout(_closingTimer);_closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},5000)}
+    else{qaState='idle';resumeFromInterrupted()}
+    return;
+  }
+  // "질문 있습니다" 류 → 설정 음성(프리캐시)으로 즉시 응답
+  if(detectIntent(q)==='ask'){    qa.textContent='💬 질문을 기다리고 있습니다…';
     setStatus('💬 질문해 주세요');
-    speakUnified('네, 질문해 주세요.');
     qaState='waiting_question';
-    scheduleWaitQTimer();
+    qaLog('ask',{q:q.slice(0,80)});
+    qaFlushLog({state:'ask',q:q.slice(0,120)});
+    purgePrefetchTts();  // [2026-10-05 v2] 멘트가 프리페치(대기+인플라이트) 뒤에 줄서 6s 텍스트 대체로 빠지는 것 방지 — 실질문 경로(아래)와 동일 처리
+    // [2026-10-05] 대기 타이머는 멘트 "재생 완료 후"부터 — 기존엔 인터럽트 즉시 12초를 세기
+    // 시작해 멘트 재생이 늦어지면 "질문해 주세요" 직후 곧바로 "질문 없으시면…"이 이어졌음.
+    speakUnified('질문해 주세요.').then(()=>{if(qaState==='waiting_question')scheduleWaitQTimer()});
     return;
   }
 
   // ── 본격 질문 → 3중 병렬 실행 ──
+  _lastQ=q;  // [2026-10-05 v9c] 메타 질문("아까 그 질문") 재링크용 직전 질문 추적
   qa.textContent='💬 질문: '+q;
   setStatus('💬 답변 준비 중…');
+  const stats={errors:[],fillers:1};
+  stats.purged=purgePrefetchTts();  // [2026-10-05] 발표 프리페치 백로그 폐기 — Q&A 음성 우선
+  qaLog('purge_prefetch',{n:stats.purged});
 
-  // A) 즉시: 브라우저 TTS 추임새 (0ms 시작 — 침묵 없음)
-  // 질문이 명확히 인식됐으면(detectIntent==='question') 되묻지 않고 바로 답변 준비 멘트만, 불명확하면 질문을 되풀이해 확인
-  const fillerPromise=speakUnified(detectIntent(q)==='question'?nextPlainFiller():nextFiller(q));
+  // B0) [2026-10-05] RAG 검색을 질문 접수 즉시 시작 — 추임새·LLM과 병렬. 기존엔 답변 생성
+  // 내부에서 직렬(RAG 끝 → LLM 시작)이라 검색 지연이 답변 전체를 밀었다.
+  const ragPromise=(ragEnabled&&refDocs.length)?searchRef(q,3).catch(e=>{stats.errors.push('rag:'+((e&&e.message)||'').slice(0,60));return[]}):Promise.resolve([]);
 
-  // B) 병렬: RAG 검색 + LLM 답변 생성 — 추임새(음성)와 별개로, 화면엔 음성 없이 "검색중" 표시
+  // A) 즉시: 설정 음성 추임새 (프리캐시 — 0ms 시작). [2026-10-05 v3] 정적 추임새로 통일 —
+  // 동적 되묻기("…맞을까요?")는 프리캐시 불가 + GPU 경합 시 6초 예산 미스 → 침묵(실측 [b0tm]).
+  const fillerPromise=speakUnified(nextPlainFiller());
+
+  // B) 병렬: RAG(이미 시작됨) + LLM 답변 생성
   showSearchIndicator();
-  const answerPromise=generateAnswer(q).finally(hideSearchIndicator);
+  const answerPromise=generateAnswer(q,ragPromise,stats).finally(hideSearchIndicator);
 
-  // C) 추임새 재생 완료 대기 → 답변 TTS (OpenAI 고품질)
+  // C) 추임새 재생 → 답변 대기. [2026-10-05] 답변이 늦으면 시간벌기 추임새를 이어서 재생해
+  // 침묵 구간을 없앤다(사용자 요청: "잠시 기다려주세요" 류로 시간을 벌 것). 문구는 전부 프리캐시.
   await fillerPromise;
   setStatus('💬 답변 중…');
-  const answer=await answerPromise;
-  qa.textContent+='\n\n💡 '+answer.slice(0,200);
-  // 두 번째 침묵 구간 — 답변 텍스트는 나왔지만 TTS 음성이 아직 생성 전이라 다시 잠깐 조용해짐.
-  // 실제 재생이 시작되면(오디오 onplay) 자동으로 사라짐(hideSearchIndicator).
-  showSearchIndicator();
-  await speak(answer);  // OpenAI TTS — 여기서만 네트워크 비용 지불
+  const TIME_BUYERS=['관련 내용을 찾아보고 있습니다. 잠시만 기다려 주세요.','자료를 확인 중입니다. 조금만 더 기다려 주세요.'];
+  const _SENT={};  // 아직 안 끝났음을 뜻하는 센티널
+  let ans=await Promise.race([answerPromise,new Promise(r=>setTimeout(()=>r(_SENT),1200))]);
+  for(let i=0;ans===_SENT&&i<TIME_BUYERS.length;i++){
+    stats.fillers++;
+    await speakUnified(TIME_BUYERS[i]);
+    ans=await Promise.race([answerPromise,new Promise(r=>setTimeout(()=>r(_SENT),5000))]);
+  }
+  const answer=(typeof ans==='string'&&ans)?ans:'죄송합니다, 발표 후 더 자세히 답변드리겠습니다.';
+  qa.textContent+='\n\n💡 '+(stats.ragMiss?'관련 지식이 아직 없습니다. 발표를 진행하는 동안 에이전트가 찾아보고 답변드리겠습니다.':answer.slice(0,200));
+  // [2026-10-05] "AI 답변 검색중…"을 답변 TTS 구간에 다시 띄우지 않는다 — 실발표에서 TTS가
+  // 늦어지면 이 표시가 60초+ 떠 있어 무한루프처럼 보였던 것(실측 로그). 검색은 이미 끝났고
+  // 답변 텍스트는 화면에 있으므로 상태 문구만 바꾼다.
+  setStatus('💬 답변 음성 생성 중…');
+  const _at0=Date.now();
+  // [2026-10-05 v6] rag-miss는 답변 음성을 만들지 않는다 — 아래 거절 통보+즉시 재개 시나리오로 감
+  if(!stats.ragMiss)stats.answerTtsOk=await speakQaAnswer(answer);  // 설정 음성 — 실패 시 텍스트 유지(브라우저 폴백 없음)
+  stats.answerTtsMs=Date.now()-_at0;
+  hideSearchIndicator();  // 표시기 잔존 방어 — 어떤 경로로 켜졌든 확인 멘트 전엔 닫혀 있어야 한다
+
+  qaFlushLog({state:'answer',q:String(q).slice(0,300),ragMs:stats.ragMs??null,scriptMs:stats.scriptMs??null,llmMs:stats.llmMs??null,engine:stats.engine||null,ragRefs:stats.ragRefs??null,ragTimeout:!!stats.ragTimeout,fillers:stats.fillers,answerChars:stats.answerChars??answer.length,answerTtsMs:stats.answerTtsMs??null,textFallback:!stats.engine&&!stats.ragMs&&!stats.llmMs?false:undefined,errors:stats.errors});
+  // [2026-10-05] Jev QA Router 섀도 관찰 — 기존 QA가 "다 끝난 뒤" 결과만 비동기 보고(지시서 §35).
+  // await 없이 fire-and-forget, 실패 무시: 이 보고가 사용자 QA 결과에 개입할 경로가 구조적으로 없다.
+  try{fetch('/ppt-agent/api/decision/observe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:String(q).slice(0,300),slideTitle:(slides[curSlideIdx]||{}).title||null,sessionMode:fromClosing?'closing_qa':'interrupt',rag:{count:stats.ragRefs??0,topScore:stats.ragTop??null,autoTop:!!stats.ragAuto},actual:{engine:stats.engine||null,ragMiss:!!stats.ragMiss,llmCalled:stats.engine==='openai-script'||stats.engine==='local',responseMs:stats.scriptMs??null,ttsMs:stats.answerTtsMs??null}})}).catch(()=>{})}catch(e){}
+
+  // [2026-10-05] 답변하지 못한 질문 폐루프 — 자료 미스(ragMiss)든 답변 음성 시간 초과든,
+  // "제대로 음성으로 답변하지 못한 질문"을 관리자 요청으로 적재한다. 서버가 state='rag_miss'를
+  // eval/rag-miss.jsonl에도 적어 다음 세션이 RAG 보강(임베딩) 근거 목록으로 바로 쓴다.
+  // 사용자 지시: "폐루프에서 답변하지 못한 질문은 관리자에게 RAG 임베딩을 요청해 다음번엔 정상 답변".
+  if(stats.ragMiss||!stats.answerTtsOk){
+    const _reason=stats.ragMiss?'rag_miss':'answer_tts_timeout';
+    qaLog('rag_miss',{q:String(q).slice(0,200),reason:_reason,ragRefs:stats.ragRefs??0,ragTop:stats.ragTop??null,ragTimeout:!!stats.ragTimeout,engine:stats.engine||null});
+    qaFlushLog({state:'rag_miss',q:String(q).slice(0,300),reason:_reason,ragRefs:stats.ragRefs??0,ragTop:stats.ragTop??null,ragTimeout:!!stats.ragTimeout,engine:stats.engine||null});
+    // [2026-10-05] 자료 미스일 때만 자동 습득 — 음성 초과는 지식이 있는데 TTS가 늦은 케이스라 습득 불필요.
+    // [2026-10-05 v6] 습득 후 재확인은 startDeferredQA(지연 답변 시나리오)가 담당 — 기존 "다시 질문해
+    // 주세요" 안내(scheduleKnowledgeRecheck)는 슬라이드 종료 제안 방식으로 대체됐다.
+    if(stats.ragMiss&&acquireWorthy(q)){requestKnowledgeAcquire(q);startDeferredQA(q)}
+    else if(stats.ragMiss)dbg('🚫 습득 보류 — 품질 게이트 미달: "'+String(q).slice(0,30)+'"');
+  }
+
+  // [2026-10-05 v6.1] rag-miss 시나리오(사용자 지정) — "무작정 답변할 수 없다고 넘어가지 말고,
+  // 관련 지식이 없으니 먼저 발표를 진행하고 에이전트에게 관련 지식을 찾아보게 하겠다고 답한다".
+  // 이후 에이전트가 답변을 찾으면 발표를 잠시 멈추고 동의를 얻어 답변한 뒤 이어간다(문장 경계 훅).
+  if(stats.ragMiss){
+    // [2026-10-05 v9e] 발표 종료 후(closing_qa) 미스는 중간 멘트("먼저 발표를 진행하고…")가
+    // 어울리지 않는다(실측: 발표 끝나고 jev 답 찾았는지 물었는데 중간 멘트). 사용자 지정:
+    // "못 찾았다고 하고 죄송하다고 마무리". 습득 자체는 계속 돌려 답이 나오면 즉시 제공(deferRecheck
+    // closing 분기)하되, 즉석 멘트는 사과로 간다.
+    if(fromClosing){
+      setStatus('💬 관련 지식 미발견 — 사과 후 Q&A 계속');
+      await speakUnified('관련 지식을 찾지 못했습니다. 죄송합니다.');
+      if(gen!==_qaGen)return;
+      qaState='closing_qa';setStatus('💬 더 질문 있으신가요?');
+      await speakUnified('더 질문 있으신가요?');
+      clearTimeout(_closingTimer);
+      _closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},5000);
+      return;
+    }
+    setStatus('💬 관련 지식 보강 중 — 발표를 진행한 뒤 답변드리겠습니다');
+    await speakUnified('관련 지식이 아직 없습니다. 먼저 발표를 진행하고, 제 에이전트가 관련 지식을 찾아 답변드리겠습니다.');
+    if(gen!==_qaGen)return;  // [2026-10-05 v9] 멘트 사이에 정지/새 인터럽트 — 낡은 인스턴스의 상태 기록 금지
+    if(fromClosing){  // 종료 Q&A 중 미스 — 재개할 발표가 없으므로 closing 흐름으로 복귀
+      qaState='closing_qa';setStatus('💬 더 질문 있으신가요?');
+      await speakUnified('더 질문 있으신가요?');
+      clearTimeout(_closingTimer);
+      _closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},5000);
+      return;
+    }
+    qaState='idle';
+    // [2026-10-05 v9] 답변 중 접수된 후속 질문 이어받기 — 재개 직전에 처리해 유실 없앰.
+    // 먼저 답변드리고, 원래 질문은 지연 답변(offer 훅)이 여전히 담당한다.
+    if(_pendingQ){const _nq=_pendingQ;_pendingQ=null;dbg('🔁 대기 질문 이어받기: "'+_nq.slice(0,24)+'"');handleInterruption(_nq);return}
+    resumeFromInterrupted();
+    return;
+  }
 
   // D) 확인 — closing_qa(발표 종료 후 Q&A)에서 호출된 경우엔 호출부가 자체적으로
   // "더 질문 있으신가요?"를 이어서 말하므로, 여기서 또 물으면 멘트가 겹쳐 어색해진다 → 생략.
   if(fromClosing)return;
+  // [2026-10-05 v9] 확인 멘트 대신 대기 질문 즉시 이어받기 — "다른 질문 없으시면…"을 되묻고
+  // 8초를 기다리는 것보다 접수된 질문을 바로 답하는 게 자연스럽다.
+  if(_pendingQ){const _nq=_pendingQ;_pendingQ=null;dbg('🔁 대기 질문 이어받기: "'+_nq.slice(0,24)+'"');handleInterruption(_nq);return}
   await speakUnified('다른 질문 없으시면 계속 발표해도 될까요?');
+  if(gen!==_qaGen)return;  // [2026-10-05 v9] 멘트 사이 정지/새 인터럽트 방어
   // 발표 중 인터럽트면 confirming, Q&A 종료 중이면 confirming 후 closing_qa 복귀
   qaState='confirming';
   setStatus('💬 다른 질문 있으시면 말씀해 주세요');
   scheduleConfirmTimer();
 }
 let _confirmTimer=null;
+// [2026-10-05 v9] 답변 재생 중 접수한 후속 질문 대기열 + 인터럽트 세대 가드
+let _pendingQ=null;
+let _qaGen=0;
+let _lastQ='';  // [2026-10-05 v9c] "아까 질문한 거" 메타 참조가 가리킬 직전 실질 질문
 function scheduleConfirmTimer(){
   clearTimeout(_confirmTimer);
   _confirmTimer=setTimeout(()=>{if(qaState==='confirming'){qaState='idle';resumeFromInterrupted()}},8000);
+}
+// [2026-10-05 v6] 지연 답변 제안 무응답 타이머 — 애매한 발화로 응답 시간을 연장할 때만 재설정
+function scheduleDeferTimer(){
+  clearTimeout(_deferTimer);
+  _deferTimer=setTimeout(()=>{if(qaState==='deferring'){qaState='idle';resolveDeferred(false);dbg('⏱ 답변 제안 무응답 — 다음 진행')}},8000);
 }
 // "질문 있으신가요?"/"네, 말씀해 주세요" 후 사용자가 실제 질문을 안 하고 계속 침묵하면
 // 무한정 멈춰있지 않도록 — 일정 시간 후 자동으로 발표를 재개한다. 도중에 아무 말이라도
 // 감지되면(아직 생각 중일 수 있으니) 매번 다시 연장한다.
 let _waitQTimer=null;
-function scheduleWaitQTimer(){
+let _waitQExt=0;  // [2026-10-05 v9] 발화 중 연장 횟수 — 무한 대기 방지 상한(6회≈+48초)
+function scheduleWaitQTimer(isExtend){
+  if(!isExtend)_waitQExt=0;
   clearTimeout(_waitQTimer);
   _waitQTimer=setTimeout(async()=>{
     if(qaState==='waiting_question'){
+      // [2026-10-05 v9] 발화 중 공지 금지 — 사용자가 지금 말하고 있으면(interim 포함 STT 이벤트가
+      // 최근 5초 내) "질문이 없으시면…"을 덧붙이지 않고 대기만 연장한다. 공지 TTS가 질문과 겹쳐
+      // STT 결과가 에코 판정에 묻혀 유실되는 것이 "질문을 받지 않고 진행한다" 체감의 두 번째 원인.
+      if(Date.now()-_sttLastEvt<5000){
+        if(++_waitQExt<=6){dbg('⏳ 질문 대기 연장 — 사용자 발화 감지, 공지 보류');scheduleWaitQTimer(true);return}
+        dbg('⏳ 질문 대기 연장 상한 도달 — 공지 후 재개');
+      }
       qaState='idle';
       await speakUnified('질문이 없으시면 계속 진행하겠습니다.');
       resumeFromInterrupted();
@@ -1156,6 +2138,28 @@ let _playGen=0;
 async function playSentenceStream(idx){
   const gen=_playGen;  // 이 체인의 세대 캡처
   if(!playing||interrupted)return;
+  // [2026-10-05 v6.1] 지연 답변 일시정지 훅 — 답변이 준비되는 대로 "다음 문장 시작 전"에 잠시
+  // 멈추고 동의를 얻는다(사용자 지정: "에이전트가 답변을 찾으면 발표를 잠시 멈추고 조금 전
+  // 질문하신 OOO에 대하여 답변 드려도 될까요?"). 슬라이드 끝만이 아니라 모든 문장 경계에서 검사 —
+  // ready 전환 즉시 다음 경계(최대 한 문장 뒤)에서 개입한다.
+  if(_deferQA&&_deferQA.status==='ready'&&!interrupted){
+    const want=await offerDeferredAnswer();
+    if(gen!==_playGen||interrupted||!playing)return;  // 제안 중 새 질문/정지 — 체인 폐기
+    if(want){
+      const d=_deferQA;_deferQA=null;
+      if(d&&d.answer){
+        setStatus('💬 대기 질문 답변 재생');
+        await speakUnified('답변 드리겠습니다.');  // "네," 접두 금지(조기 EOS 실측) — 프리캐시 문구
+        if(gen!==_playGen||interrupted||!playing)return;
+        await speakQaAnswer(d.answer);
+        if(gen!==_playGen||interrupted||!playing)return;
+        qaLog('deferred_answer',{waitMs:Date.now()-d.started,chars:(d.answer||'').length});
+        qaFlushLog({state:'deferred_answer',q:d.q,waitMs:Date.now()-d.started});
+      }
+    }
+    document.getElementById('qaBox').style.display='none';
+    if(!playing||interrupted)return;
+  }
   if(idx>=sentences.length){
     if(curSlideIdx<slides.length-1)await presentSlide(curSlideIdx+1);
     else{await startClosingQA()}
@@ -1165,24 +2169,51 @@ async function playSentenceStream(idx){
   // ── 동기화 자가 점검 — 화면이 발화 중인 슬라이드와 다르면 AI가 인지하고 복구 ──
   if(_visualSlideIdx!==curSlideIdx){
     console.log(`sync mismatch: visual=${_visualSlideIdx}, audio=${curSlideIdx} → 자가 복구`);
+    dbg('⚠ 화면-음성 불일치 감지 — 교정 멘트 후 복구');
     const msg=SYNC_CORRECTIONS[_syncCorrIdx++%SYNC_CORRECTIONS.length];
     await speakUnified(msg);
     if(gen!==_playGen)return;  // 복구 멘트 중 다른 슬라이드로 전환됐으면 중단
     renderSlide(curSlideIdx);   // 화면 복구
   }
   const cs=slides[curSlideIdx];let url=cs._audioCache&&cs._audioCache[idx];if(cs._audioCache)delete cs._audioCache[idx];
-  if(!url){
-    setStatus(`🔊 문장 ${idx+1} 변환 중…`);
-    url=await ttsSentence(sentences[idx]);
+  if(!url){dbg('문장 '+(idx+1)+' 캐시 미스 — 변환 대기');
+    // [2026-10-05 v8] 파이프라인 재충전 — 이 문장이 미스라면 뒤 문장도 큐에 없을 가능성(Q&A 폐기
+    // 직후 재개, 슬라이드 전환 직후 등). 재생이 생성 속도를 따라잡아 "한 문장 말하고 침묵"이
+    // 되는 스톨을 막으려면 뒤 문장이 미리 큐에 등록돼 있어야 한다. getSlideAudio가 중복을
+    // 걸러주므로 무조건 시도해도 안전하다.
+    for(let k=idx+1;k<sentences.length;k++){if(!(cs._audioCache&&cs._audioCache[k])&&!(cs._audioFetch&&cs._audioFetch[k]))getSlideAudio(cs,k,sentences[k])}
+    // [2026-10-04] 프리페치가 이미 그 문장을 처리 중이면 그 Promise를 기다린다 — 중복 fetch(동시 요청 = runaway 유발) 방지.
+    // 대기가 길어질 수 있으므로 0.3초 폴링으로 (완료/전체) 진행바를 실시간 갱신한다.
+    const f=cs._audioFetch&&cs._audioFetch[idx];
+    if(f){
+      let iter=0,stallWarned=false;
+      for(;;){
+        // [2026-10-05] 인터럽트/전환 시 대기 포기 — 기존엔 변환 완료까지 폴링을 계속해
+        // Q&A 진입 후 늦게 완성된 문장이 발표 도중 재개 없이 재생되거나(speakFB 누설),
+        // 폐기된 큐 잡을 영원히 기다리는 유령 체인이 생겼다.
+        if(interrupted||gen!==_playGen)return;
+        setStatus(`🔊 문장 ${idx+1} 변환 중…`+(iter>26?` (${Math.round(iter*0.3)}초 — GPU 경합 지연)`:''),cs._audioDone||0,sentences.length);  // [2026-10-05] 8초+ 대기 시 경과 표시 — 침묵이 '멈춤'처럼 보이지 않게
+        // [2026-10-04] f가 거부되어도 체인이 죽지 않게 방어 — null로 처리해 폴백 경로로
+        let rr=null;
+        try{rr=await Promise.race([f.then(v=>({v})),new Promise(r2=>setTimeout(()=>r2(null),300))])}catch(_){rr={v:null}}
+        if(rr){url=rr.v;dbg('문장 '+(idx+1)+' 대기 해제 — '+(url?'음성 수신':'실패(null)'));break}
+        if(++iter===100&&!stallWarned){stallWarned=true;dbg('⚠ 문장 '+(idx+1)+' 대기 30초+ — 큐 밀림 의심')}
+      }
+    }
+    if(!url){setStatus(`🔊 문장 ${idx+1} 변환 중…`,cs._audioDone||0,sentences.length);
+      // [2026-10-04 v5] 재시도는 큐 '선두'로 — 뒤에 붙으면 프리페치 백로그 뒤에 줄서 수 분 대기(실측 블랙홀)
+      url=await getSlideAudio(cs,idx,sentences[idx],true).catch(()=>null);dbg('문장 '+(idx+1)+' 재시도 결과 — '+(url?'수신':'실패'))}
   }
   // 세대 체크 — presentSlide가 다시 호출됐으면 이 체인은 폐기
   if(gen!==_playGen){console.log('stale chain aborted, slide',curSlideIdx);return}
-  if(url){noteSpoken(sentences[idx]);await playAudio(url)}else await speak(sentences[idx]);  // 에코(자기 목소리 재인식) 방지에 필수
+  if(url){noteSpoken(sentences[idx]);await playAudio(url)}
+  else{setStatus('⚠ 문장 '+(idx+1)+' 음성 생성 실패 — 자막으로 확인해 주세요');qaLog('sentence_tts_fail',{idx:idx+1,chars:(sentences[idx]||'').length});dbg('⚠ 문장 '+(idx+1)+' 음성 실패 — 스킵(브라우저 음성 금지)')}  // [2026-10-05] 정책 확장(사용자 지정): 브라우저 폴백 음성 원천 금지 — 이국 억양·중국계 발음이 어디서도 나오지 않게. 자막에 원문이 있으므로 스킵하고 다음 문장으로
   if(interrupted)return;
   if(gen!==_playGen)return;
-  // ③ 문장 간 자연스러운 쉼 (0.7초) — 급하지 않게, 관객이 따라올 시간
+  // ③ 문장 간 자연스러운 쉼 — [2026-10-04 v7] 쉼표로 갈라진 조각 사이는 200ms(짧은 호흡),
+  // 문장 끝은 700ms. v6에서 조각 간에도 700ms가 들어가 "문장 중간 무음"이 생겼었다.
   if(idx+1<sentences.length){
-    await new Promise(r=>setTimeout(r,700));
+    await new Promise(r=>setTimeout(r,(sentenceGaps&&sentenceGaps[idx]!=null)?sentenceGaps[idx]:700));
     if(gen!==_playGen)return;  // 쉼 중 전환 체크
   }
   playSentenceStream(idx+1)}
@@ -1196,15 +2227,20 @@ async function presentSlide(idx){
   try{speechSynthesis.cancel()}catch(e){}
   ttsSpeaking=false;
   curSlideIdx=idx;const s=slides[idx];
-  prefetchNextSlide(idx);  // 이 슬라이드가 말하는 동안 다음 슬라이드 스크립트+첫 문장 음성을 미리 준비
+  // [2026-10-04 v5] prefetchNextSlide는 이 함수 끝(문장 큐 등록 직후)으로 이동 — 시작 시점에 호출하면
+  // 다음 슬라이드 스크립트가 본 슬라이드 스크립트와 '동시에' 생성돼, 먼저 끝나는 쪽(=다음 슬라이드)이
+  // TTS 큐 전체를 선점. 실측: 본 슬라이드 첫 문장이 다음 슬라이드 10문장 뒤에 줄서 20초+ 대기했다.
 if(!s.script){setStatus('🧑‍🏫 슬라이드 '+(idx+1)+' 준비 중…');
+  dbg('슬라이드 '+(idx+1)+' 스크립트 생성 대기…');
   const ok=await ensureScript(idx);
-  if(!ok||!s.script||s.script.length<10){s.script=s.note||s.bullets.join('. ')||s.title||'발표를 시작합니다.';}
+  if(!ok||!s.script||s.script.length<10){s.script=s.note||s.bullets.join('. ')||s.title||'발표를 시작합니다.';dbg('⚠ 스크립트 생성 실패 — 노트로 대체')}
 }
 // 스크립트 생성 후 세대 체크 — 대기 중 다른 슬라이드로 전환됐으면 중단
 if(gen!==_playGen){console.log('presentSlide stale after script gen');return}
 // URL은 발화에서 제거 — AI가 "h-t-t-p-s-colon-slash-slash..."라고 영어로 읽지 않게
-sentences=scriptToSentences(s.script);
+const _parts=scriptToSentences(s.script);
+sentences=_parts.map(p=>p.t);
+sentenceGaps=_parts.map(p=>p.soft?200:700);  // 쉼표 조각 사이 200ms(자연스러운 호흡) / 문장 끝 700ms
 curSentenceIdx=0;
 // [2026-10-01] 이미지가 크거나 많은 PPT("Flattened"류 — 슬라이드 1장이 고해상도 이미지 1장)에서
 // 백그라운드 이미지 로딩이 내레이션 속도를 못 따라가면, 이 슬라이드가 아직 로딩 중인 채로
@@ -1222,20 +2258,29 @@ setStatus('📄 슬라이드 '+(idx+1)+'/'+slides.length+' — 화면 전환');
 await new Promise(r=>setTimeout(r,800));
 if(gen!==_playGen)return;  // 정지 중 전환됐으면 중단
 if(!playing)return;
-// ── 병렬 TTS 프리페치 — 슬라이드의 모든 문장을 동시에 변환 시작 ──
-// 첫 문장은 playSentenceStream에서 직접 대기, 나머지는 백그라운드에서 병렬 생성.
-// 문장 N 재생이 끝날 때쯤 문장 N+1~는 이미 캐시에 있음 → 무음 구간 0초.
+// ── 슬라이드 전체 TTS 프리페치 — [2026-10-04] 동시 발사 → 직렬 큐 등록으로 변경 ──
+// 예전엔 forEach로 모든 문장을 동시에 fetch해 mlx 서버 GPU 경합으로 전부 94초 runaway가 나
+// "한 문장 말하고 침묵"이 생겼다. enqueueTts 직렬 큐가 순서대로 처리하고 재생 소비 속도(문장당 3~5초)가
+// 변환 속도(1~2초)를 앞지르지 못하므로 문장 간 무음은 0에 수렴한다.
 // [2026-10-02] s._audioCache는 더 이상 여기서 통째로 비우지 않음 — prefetchNextSlide가 이전 슬라이드
 // 재생 중에 이미 문장 0번을 채워놨을 수 있는데, 예전처럼 비워버리면 그 작업이 버려져서
 // playSentenceStream이 같은 문장을 또 fetch하는 중복 호출이 발생했었다.
 if(!s._audioCache)s._audioCache={};
-sentences.forEach((text,i)=>{
-  if(!s._audioCache[i]){
-    ttsSentence(text).then(u=>{if(u)s._audioCache[i]=u}).catch(()=>{});
-  }
-});
+dbg('슬라이드 '+(idx+1)+' 재생 — 문장 '+sentences.length+'개');
+sentences.forEach((text,i)=>getSlideAudio(s,i,text));
+prefetchNextSlide(idx);  // [2026-10-04 v5] 본 슬라이드 문장이 큐에 등록된 '뒤'에 다음 슬라이드 프리페치 — 큐 선점 방지. 재생 시간(수십 초) 동안 스크립트/TTS가 미리 끝난다.
 await playSentenceStream(0)}
 
+// [2026-10-05] 화면 채움 방식 — 'contain'(기본: 비율 유지, 남는 공간은 여백) | 'cover'(꽉 채움:
+// 화면을 전부 채우고 슬라이드의 넘치는 부분은 잘라냄 — 여백 0). ctrlBar 🖼 버튼으로 전환, 선택 기억.
+let sFitMode='contain';try{if(localStorage.getItem('pptFitMode')==='cover')sFitMode='cover'}catch(_){}
+// 캔버스 fit 크기 계산 — renderSlide과 fit 감시 루프가 같은 수식을 공유
+function _fitCanvasSize(el,_rx,_ry){
+  const _aw=el.clientWidth,_ah=el.clientHeight;
+  if(sFitMode==='cover')return[_aw,_ah]; // 꽉 채움 — 캔버스=컨테이너 전체, 이미지가 cover로 잘라내며 채움
+  const _r=_rx/_ry;let _w=_aw,_h=_w/_r;if(_h>_ah){_h=_ah;_w=_h*_r}
+  return [Math.floor(_w),Math.floor(_h)];
+}
 function renderSlide(idx){
   _visualSlideIdx=idx;  // 동기화 점검용 — 실제로 그린 슬라이드 기록
   const s=slides[idx];const el=document.getElementById('slideContent');
@@ -1247,17 +2292,39 @@ function renderSlide(idx){
   console.log(`슬라이드 ${idx+1} 렌더(${positioned?'위치지정':'폴백'}) slideSize=${sz?sz.w+'x'+sz.h:'?'}`,
     (s.shapes||[]).map(sh=>sh.box?`${sh.type}:${(sh.box.x/sz.w*100).toFixed(1)}%,${(sh.box.y/sz.h*100).toFixed(1)}% ${(sh.box.w/sz.w*100).toFixed(1)}%x${(sh.box.h/sz.h*100).toFixed(1)}%`:`${sh.type}:box없음`));
   if(positioned){
+    // [2026-10-04 v9] 캔버스 fit+중앙 정렬 — 기존 width:100%는 화면 세로를 넘어 아래가 잘리거나,
+    // 덱/화면 비율이 어긋나면 좌측에 붙어 우측 여백으로 보였다(사용자 불만). PowerPoint 발표 뷰처럼
+    // 화면에 맞는 최대 크기로 비율을 유지하며 축소해 양축 중앙에 배치.
+    el.classList.add('canvasMode');
+    el.classList.toggle('coverMode',sFitMode==='cover'); // 꽉 채움 모드에서 이미지 object-fit:cover 적용
+    // [2026-10-04 v9.2] 콘텐츠 바운딩 박스 크롭 — 생성 덱은 도형이 슬라이드 한쪽(주로 좌측)에만
+    // 몰려 캔버스 안쪽에 큰 여백이 남는다(실측: 슬라이드당 도형 1개). 도형들의 합영역+4% 여유로
+    // 캔버스를 잘라내고 도형 좌표를 재매핑하면 콘텐츠가 화면을 채우며 중앙에 온다. 콘텐츠가 슬라이드의
+    // 92% 이상이면 원본 그대로(풀블리드 이미지 덱 보호).
+    let _bx=sz.w,_by=sz.h,_br=0,_bb=0,hasBox=false;
+    s.shapes.forEach(sh=>{if(!sh.box)return;hasBox=true;const b=sh.box;
+      _bx=Math.min(_bx,b.x);_by=Math.min(_by,b.y);_br=Math.max(_br,b.x+b.w);_bb=Math.max(_bb,b.y+b.h)});
+    const _pad=Math.min(sz.w,sz.h)*0.04;
+    _bx=Math.max(0,_bx-_pad);_by=Math.max(0,_by-_pad);
+    _br=Math.min(sz.w,_br+_pad);_bb=Math.min(sz.h,_bb+_pad);
+    const _cw=hasBox?Math.max(1,_br-_bx):sz.w,_ch=hasBox?Math.max(1,_bb-_by):sz.h;
+    const _crop=hasBox&&(_cw<sz.w*0.92||_ch<sz.h*0.92);
+    const _rx=_crop?_cw:sz.w,_ry=_crop?_ch:sz.h,_ox=_crop?_bx:0,_oy=_crop?_by:0;
     const body=s.shapes.map(sh=>{
       const b=sh.box;
-      const pos=`left:${(b.x/sz.w*100).toFixed(3)}%;top:${(b.y/sz.h*100).toFixed(3)}%;width:${(b.w/sz.w*100).toFixed(3)}%;height:${(b.h/sz.h*100).toFixed(3)}%;`;
+      const pos=`left:${((b.x-_ox)/_rx*100).toFixed(3)}%;top:${((b.y-_oy)/_ry*100).toFixed(3)}%;width:${(b.w/_rx*100).toFixed(3)}%;height:${(b.h/_ry*100).toFixed(3)}%;`;
       if(sh.type==='image')return sh.src?`<img class="slideShapeImg" style="${pos}" src="${sh.src}"/>`:'';
       // ponytail: 폰트 크기는 박스 높이 비율로 근사(실제 <a:rPr sz> 미반영) — 틀어지면 다음 단계로 rPr 읽기 추가
-      const fs=(b.h/sz.h*100*(sh.type==='title'?0.6:0.22)).toFixed(2);
+      // [2026-10-04 v9] vh→cqh — 캔버스 높이 기준 스케일. 캔버스가 화면에 맞춰 축소돼도 글자가 같이 줄어든다.
+      const fs=(b.h/_ry*100*(sh.type==='title'?0.6:0.22)).toFixed(2);
       const clampLo=sh.type==='title'?14:10,clampHi=sh.type==='title'?64:32;
-      return `<div class="${sh.type==='title'?'slideShapeTitle':'slideShapeText'}" style="${pos}font-size:clamp(${clampLo}px,${fs}vh,${clampHi}px)">${esc(sh.text)}</div>`;
+      return `<div class="${sh.type==='title'?'slideShapeTitle':'slideShapeText'}" style="${pos}font-size:clamp(${clampLo}px,${fs}cqh,${clampHi}px)">${esc(sh.text)}</div>`;
     }).join('');
-    el.innerHTML=`<div class="slideCanvas" style="aspect-ratio:${sz.w}/${sz.h}">${body}</div>`;
+    const [_w,_h]=_fitCanvasSize(el,_rx,_ry);
+    el.innerHTML=`<div class="slideCanvas" style="width:${_w}px;height:${_h}px;aspect-ratio:${_rx}/${_ry}">${body}</div>`;
+    dbg('슬라이드 '+(idx+1)+' 렌더 '+sz.w+'x'+sz.h+' 도형'+s.shapes.length+(_crop?' 크롭('+Math.round(_cw/sz.w*100)+'%x'+Math.round(_ch/sz.h*100)+'%)':' 전체')+' → 캔버스 '+Math.floor(_w)+'x'+Math.floor(_h)+' 중앙정렬 [박스 '+s.shapes.slice(0,3).map(sh=>sh.box?Math.round(sh.box.x/sz.w*100)+','+Math.round(sh.box.y/sz.h*100)+' '+Math.round(sh.box.w/sz.w*100)+'x'+Math.round(sh.box.h/sz.h*100)+'%':'?').join(' / ')+']');
   }else{
+    el.classList.remove('canvasMode');
     let h='';if(s.title)h+='<h2>'+esc(s.title)+'</h2>';if(s.bullets.length)h+='<ul>'+s.bullets.map(b=>'<li>'+esc(b)+'</li>').join('')+'</ul>';
     const imgs=(s.shapes||[]).filter(sh=>sh.type==='image'&&sh.src).map(sh=>sh.src).concat(s.images||[]);
     imgs.forEach(u=>{h+='<img src="'+u+'"/>'});
@@ -1316,50 +2383,127 @@ function hideSearchIndicator(){
 function enterFS(){
   const el=document.documentElement;
   document.querySelector('.topBar').style.display='none';
+  document.body.classList.add('fs'); // [2026-10-05] topBar의 52px을 .main에 돌려줘 슬라이드 최대 표시
   document.getElementById('ctrlBar').classList.remove('hidden');
   document.getElementById('btnPanel').style.display='flex';
   if(el.requestFullscreen)return el.requestFullscreen().catch(()=>{});
   if(el.webkitRequestFullscreen)el.webkitRequestFullscreen();
   return Promise.resolve();
 }
-function exitFS(){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});else if(document.webkitFullscreenElement)document.webkitExitFullscreen();document.querySelector('.topBar').style.display='flex'}
+function exitFS(){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});else if(document.webkitFullscreenElement)document.webkitExitFullscreen();document.querySelector('.topBar').style.display='flex';document.body.classList.remove('fs')}
 document.addEventListener('fullscreenchange',()=>{
-  if(!document.fullscreenElement)document.querySelector('.topBar').style.display='flex';
-  if(curSlideIdx>=0&&slides[curSlideIdx])renderSlide(curSlideIdx);  // 배율/레이아웃 재계산
+  if(!document.fullscreenElement){document.querySelector('.topBar').style.display='flex';document.body.classList.remove('fs')}
+  // [2026-10-05] rAF 한 프레임 대기 후 측정 — 전환 직후엔 topBar 숨김/높이 변경 레이아웃이 안 정착해
+  // 옛 크기로 캔버스를 만들어 상단·우측 여백이 생기던 것 방지
+  requestAnimationFrame(()=>{if(curSlideIdx>=0&&slides[curSlideIdx])renderSlide(curSlideIdx)});
 });
 
-function togglePanel(){panelOpen=!panelOpen;document.getElementById('sidePanel').classList.toggle('open',panelOpen);document.getElementById('slideWrap').classList.toggle('panelOpen',panelOpen)}
+function togglePanel(){panelOpen=!panelOpen;document.getElementById('sidePanel').classList.toggle('open',panelOpen);document.getElementById('slideWrap').classList.toggle('panelOpen',panelOpen);requestAnimationFrame(()=>{if(curSlideIdx>=0&&slides[curSlideIdx])renderSlide(curSlideIdx);syncAnnoCanvas&&syncAnnoCanvas()})}
 document.getElementById('btnPanel').onclick=togglePanel;
 function openSettings(){document.getElementById('settingsModal').classList.add('show');updatePPTList();updateRefDocList();document.getElementById('speedSlider').value=ttsSpeed;document.getElementById('speedVal').textContent=ttsSpeed.toFixed(2)+'x';updateSpeedTotalTime()}
 function closeSettings(){document.getElementById('settingsModal').classList.remove('show')}
 document.getElementById('btnSettings').onclick=openSettings;
 document.getElementById('settingsModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeSettings()});
-function setScriptEngine(m){scriptEngine=m;document.getElementById('setScrOpenAI').classList.toggle('on',m==='openai');document.getElementById('setScrLocal').classList.toggle('on',m==='local')}
+function setScriptEngine(m){scriptEngine=m;try{localStorage.setItem('ppt_agent_script_engine',m)}catch(e){}document.getElementById('setScrOpenAI').classList.toggle('on',m==='openai');document.getElementById('setScrLocal').classList.toggle('on',m==='local')}
 const OPENAI_VOICES=['alloy','echo','fable','onyx','nova','shimmer'];
+// [2026-10-04] mlx Qwen3-TTS CustomVoice 모델 9화자 전수 실측 결과 — dylan/uncle_fu/sohee/serena/vivian만
+// 정상 생성(1~2초). eric/ryan/aiden/ono_anna는 EOS 생성 실패로 36초 지연+96초 무음 WAV를 돌려
+// "문장 1 변환 중…" 정지 및 무음 재생의 원인이 됨 → UI에서 제거하고 정상 5화자만 노출.
+const LOCAL_VOICES=['dylan','uncle_fu','sohee','serena','vivian'];
+const LOCAL_BROKEN_VOICES=['eric','ryan','aiden','ono_anna'];
 // [2026-10-02] 엔진/보이스를 바꾸면 이전 설정으로 미리 만들어둔 캐시 음성(prefetchNextSlide가 채워둔
 // s._audioCache, pregenPhrases가 채워둔 promptCache)이 새 설정과 안 맞는 채로 남아있을 수 있어 비움 —
 // 안 비우면 설정을 바꿔도 다음 한두 마디는 예전 목소리로 나가는 혼란이 생긴다.
-function invalidateVoiceCaches(){slides.forEach(s=>{s._audioCache=null});promptCache={}}
-function setTtsEngine(m){
+function invalidateVoiceCaches(){slides.forEach(s=>{s._audioCache=null;s._audioFetch=null});promptCache={}}  // [2026-10-04] _audioFetch(진행 중 요청 Promise)도 함께 폐기 — 이전 보이스로 변환 중이던 음성이 새 캐시에 유입되는 것 차단
+function setTtsEngine(m,silent){
   ttsEngine=m;
+  try{localStorage.setItem('ppt_agent_tts_engine',m)}catch(e){}
   document.getElementById('ttsOpenAI').classList.toggle('on',m==='openai');
   document.getElementById('ttsLocal').classList.toggle('on',m==='local');
   document.getElementById('voiceRowOpenAI').style.display=m==='openai'?'flex':'none';
   document.getElementById('voiceRowLocal').style.display=m==='local'?'flex':'none';
-  if(m==='openai'&&!OPENAI_VOICES.includes(ttsVoice))setVoice('nova');
-  if(m==='local'&&OPENAI_VOICES.includes(ttsVoice))setVoice('eric');
+  if(m==='openai'&&!OPENAI_VOICES.includes(ttsVoice))setVoice('nova',silent);
+  if(m==='local'&&(!LOCAL_VOICES.includes(ttsVoice)||LOCAL_BROKEN_VOICES.includes(ttsVoice)))setVoice('dylan',silent);
   invalidateVoiceCaches();
+  if(m==='local'&&!silent)pregenPhrases();  // [2026-10-04] 로컬 엔진 선택 즉시 백그라운드 변환 — mlx 서버 웜업 + Q&A 문구 선준비 (발표 시작 버튼 눌렀을 때 콜드 대기 없게)
 }
-function setVoice(v){
+function setVoice(v,silent){
+  if(LOCAL_BROKEN_VOICES.includes(v))v='dylan';  // 깨진 화자 방어 — 정상 화자로 대체
   ttsVoice=v;
-  ['Alloy','Echo','Fable','Onyx','Nova','Shimmer','Eric','Dylan','Sohee'].forEach(n=>{const e=document.getElementById('v'+n);if(e)e.classList.toggle('on',n.toLowerCase()===v)});
+  try{localStorage.setItem('ppt_agent_voice',v)}catch(e){}
+  ['Alloy','Echo','Fable','Onyx','Nova','Shimmer','Dylan','UncleFu','Sohee','Serena','Vivian'].forEach(n=>{const e=document.getElementById('v'+n);if(e)e.classList.toggle('on',n.toLowerCase()===v.replace('_',''))});
   invalidateVoiceCaches();
+  // [2026-10-04] 보이스 클릭 즉시 1문장 미리듣기 — 발표 중이 아닐 때만, 소리를 직접 듣고 고르게
+  // (silent=true는 저장된 설정 복원 시 — 페이지 로드에 소리가 나면 안 되므로)
+  if(!silent&&ttsEngine==='local'&&LOCAL_VOICES.includes(v)&&!playing&&!ttsSpeaking){
+    ttsSentence('안녕하세요. 이 목소리로 발표를 진행합니다.').then(u=>{if(u)playAudio(u)}).catch(()=>{});
+  }
 }
+function setMicCmd(v){
+  micCmdEnabled=!!v;
+  try{localStorage.setItem('ppt_agent_mic_cmd',micCmdEnabled?'1':'0')}catch(e){}
+  document.getElementById('micCmdOn').classList.toggle('on',micCmdEnabled);
+  document.getElementById('micCmdOff').classList.toggle('on',!micCmdEnabled);
+  // 발표 도중 토글해도 즉시 반영
+  if(playing){if(micCmdEnabled&&!sttActive)startListening();if(!micCmdEnabled&&sttActive)stopListening()}
+}
+// [2026-10-04] 저장된 설정 복원 — 새로고침/재접속해도 마지막 엔진·목소리·음성명령 설정 유지.
+// silent=true로 복원(미리듣기/웜업 스킵 — 페이지 로드에 소리 나면 안 됨).
+(function restoreSettings(){
+  try{
+    if(ttsEngine==='local'&&LOCAL_BROKEN_VOICES.includes(ttsVoice)){ttsVoice='dylan';try{localStorage.setItem('ppt_agent_voice','dylan')}catch(e){}}
+    setTtsEngine(ttsEngine,true);
+    setVoice(ttsVoice,true);
+  }catch(e){}
+  try{setMicCmd(micCmdEnabled)}catch(e){}
+  // [2026-10-04] qaBox 클릭 = 수동 "계속" — 발표가 어떤 이유로 멈춰도 클릭 한 번으로 재개
+  const qb=document.getElementById('qaBox');
+  if(qb){qb.style.cursor='pointer';qb.title='클릭하면 발표를 계속 진행합니다';
+    qb.addEventListener('click',()=>{if(qaState==='confirming_continue')resumeFromBackgroundPause();else if(interrupted&&playing)resumeFromInterrupted()});}
+})();
 function setRagEnabled(v){ragEnabled=v;document.getElementById('ragOn').classList.toggle('on',v);document.getElementById('ragOff').classList.toggle('on',!v)}
 
-async function startPresentation(){playing=true;interrupted=false;pregenPhrases();document.getElementById('btnPlay').textContent='⏸';await enterFS();startListening();await presentSlide(Math.max(curSlideIdx,0))}
-function pausePresentation(){playing=false;document.getElementById('btnPlay').textContent='▶';if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}
-function stopAll(){playing=false;interrupted=false;document.getElementById('btnPlay').textContent='▶';if(audioEl){audioEl.pause();audioEl=null}stopListening();setStatus('정지')}
+// [2026-10-04] 오디오 잠금 해제 — Chrome 자동재생 정책은 "사용자 제스처 안에서 만들어진
+// 오디오 컨텍스트/엘리먼트"만 소리를 내준다. 발표 시작 버튼 클릭(제스처) 안에서 무음 WAV를
+// volume 0으로 한 번 재생해 그 후의 모든 Audio/SpeechSynthesis 재생이 차단되지 않게 한다.
+// "처음 잠깐 소리 나다가 이후 안 나온다" 증상의 유력 원인 중 하나.
+let _audioUnlocked=false;
+function unlockAudio(){
+  if(_audioUnlocked)return;_audioUnlocked=true;
+  try{
+    const silent='data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQQAAAAAAAAA';
+    const a=new Audio(silent);a.volume=0;
+    const p=a.play();
+    if(p&&p.catch)p.catch(e=>dbg('⚠ 오디오 잠금 실패:'+e.name));
+  }catch(e){}
+  try{
+    if(window.AudioContext||window.webkitAudioContext){
+      const ac=new (window.AudioContext||window.webkitAudioContext)();
+      if(ac.state==='suspended')ac.resume().catch(()=>{});
+      ac.close&&setTimeout(()=>{try{ac.close()}catch(e){}},300);
+    }
+  }catch(e){}
+  try{if(speechSynthesis&&speechSynthesis.speaking){/* 이미 말하는 중이면 건드리지 않음 */}}catch(e){}
+  dbg('오디오 잠금 해제 시도');
+}
+async function startPresentation(){
+if(!acquirePresLock()){setStatus('⚠ 다른 창/탭에서 발표 진행 중 — 그 창을 닫거나 정지한 뒤 시작하세요');dbg('⚠ 발표 시작 거부 — 다른 창 락 보유 중('+((_presLockGet()||{}).id)+')');return}
+dbg('=== 발표 시작 (엔진:'+(ttsEngine==='local'?'로컬/'+ttsVoice:'OpenAI')+(micCmdEnabled?', 마이크 켬':', 마이크 끔')+') win='+_WIN_ID);
+unlockAudio();
+playing=true;interrupted=false;document.getElementById('btnPlay').textContent='⏸';await enterFS();if(micCmdEnabled)startListening();  // [2026-10-04] 음성 명령이 꺼져 있으면 마이크 아예 안 켬 — 배경대화 감지로 발표가 멈추는 일 원천 차단
+pregenPhrases();  // [2026-10-05] Q&A 문구 프리생성을 발표 '시작'으로 이동 — 기존엔 await presentSlide 뒤(=발표 종료 후)에 있어 발표 내내 캐시가 빈 상태로 첫 질문 시 설정 음성 생성을 기다려야 했다. 백그라운드(fire-and-forget)라 재생을 막지 않는다.
+// [2026-10-04] 시작과 동시에 전 슬라이드 스크립트를 백그라운드 '순차' 생성 — 이후 페이지 전환마다
+// LLM 대기가 없다(기존엔 다음 슬라이드 1개만 당겨서, 빠르게 넘기면 매번 "준비 중…" 정지).
+// 주의: forEach 동시 발사 금지 — 브라우저 동일호스트 동시연결 한도(6개)를 스크립트 요청이 점거하면
+// TTS 요청이 서버에 도달조차 못 하고 20초 타임아웃→브라우저 폴백 목소리로 전환됨(실측 보고됨).
+// 순차 체인으로 항상 1개만 활성 — TTS는 즉시 연결을 쓴다. 첫 슬라이드는 presentSlide가
+// ensureScript를 await하므로 "충분히 변환한 뒤 시작"이 유지된다.
+let _scriptChain=Promise.resolve();
+slides.forEach((_,i)=>{_scriptChain=_scriptChain.then(()=>ensureScript(i)).catch(()=>{})});
+await presentSlide(Math.max(curSlideIdx,0));
+}  // [2026-10-05] pregenPhrases 호출은 발표 '시작' 지점으로 이동 (아래 발표 종료 후 실행이던 호출은 발표 내내 캐시가 빈 원인이었다)
+function pausePresentation(){playing=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('일시정지');if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}  // [2026-10-04 v9] _audioFin 즉시 해제 — 120s 고아 감시자 방지
+function stopAll(){playing=false;interrupted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);_deferQA=null;_pendingQ=null;_qaGen++;_lastQ='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring')qaState='idle';resolveDeferred(false);setStatus('정지')}  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
 // ── 마지막 슬라이드 발표 완료 → Q&A 시간 → URL 열기 ──
 let _closingTimer=null;
 function extractURL(){
@@ -1372,6 +2516,7 @@ function extractURL(){
 async function startClosingQA(){
   playing=false;interrupted=false;
   document.getElementById('btnPlay').textContent='▶';
+  purgePrefetchTts();  // [2026-10-05 v2] 발표가 끝났으므로 남은 프리페치(대기+인플라이트)는 죽은 재고 — 마무리 멘트가 뒤에 줄서 지연되지 않게 폐기
   setStatus('💬 질문 & 답변 시간');
   // 마지막 슬라이드의 노트/스크립트에 이미 마무리 멘트가 있으면 그대로 사용
   const lastSlide=slides[slides.length-1];
@@ -1390,7 +2535,11 @@ async function startClosingQA(){
 }
 async function finishPresentation(){
   clearTimeout(_closingTimer);
+  releasePresLock();  // [2026-10-05] 발표 독점 락 해제 — 다른 창이 발표를 시작할 수 있게
   qaState='idle';
+  // [2026-10-05] 세션 종료 요약 — 발화 버퍼에 남은 이벤트(tts_slow·미처 flush 안 된 것)를
+  // 누계와 함께 보내 폐루프가 발표 단위 품질 추이를 볼 수 있게 한다.
+  try{qaFlushLog({state:'session_end',q:'tts_slow='+_ttsSlowTotal+' issues='+_issueTotal})}catch(e){}
   const url=extractURL();
   stopAll();
   exitFS();
@@ -1436,7 +2585,8 @@ const ric=window.requestIdleCallback||(fn=>setTimeout(fn,500));
 ric(async()=>{
   try{
     const sv=await slidesToJsonSafe(slides);
-    await apiJson('/ppt-agent/api/ppts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:file.name,slides:sv})});
+    const saved=await apiJson('/ppt-agent/api/ppts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:file.name,slides:sv})});
+    currentPptId=saved.id;loadAnnotations();flushPendingAnnotations();  // [2026-10-04] 주석 대기열 정산
     console.log('PPT saved');
   }catch(e){console.warn('PPT save fail:',e)}
 },{timeout:8000});
@@ -1452,10 +2602,265 @@ document.getElementById('fileInput').addEventListener('change',e=>{if(e.target.f
 document.getElementById('refZone').addEventListener('click',()=>document.getElementById('refInput').click());
 document.getElementById('refInput').addEventListener('change',e=>{if(e.target.files.length)loadRefDocs([...e.target.files])});
 
-document.addEventListener('keydown',e=>{if(e.key===' '&&slides.length){e.preventDefault();playing?pausePresentation():startPresentation()}if(e.key==='ArrowRight')document.getElementById('btnNext').click();if(e.key==='ArrowLeft')document.getElementById('btnPrev').click();if(e.key==='Escape')closeSettings();if(e.key==='p'||e.key==='P')togglePanel()});
-let ctrlTimer;function revealCtrl(){const bar=document.getElementById('ctrlBar');if(bar&&slides.length){bar.classList.remove('hidden');clearTimeout(ctrlTimer);ctrlTimer=setTimeout(()=>{if(playing)bar.classList.add('hidden')},3000)}}
+document.addEventListener('keydown',e=>{if(e.key===' '&&slides.length){e.preventDefault();playing?pausePresentation():startPresentation()}if(e.key==='ArrowRight')document.getElementById('btnNext').click();if(e.key==='ArrowLeft')document.getElementById('btnPrev').click();if(e.key==='Escape')closeSettings();if(e.key==='p'||e.key==='P')togglePanel();
+// [2026-10-05] 슬라이드 자체 줌 키 — +/− 확대·축소, 0 리셋
+if((e.key==='+'||e.key==='=')&&slides.length){_sZoom=Math.min(4,_sZoom*1.25);applySlideZoom()}
+if(e.key==='-'&&slides.length){_sZoom=Math.max(0.4,_sZoom/1.25);if(_sZoom<=1){_sPanX=0;_sPanY=0}applySlideZoom()}
+if(e.key==='0'&&slides.length)resetSlideZoom()});
+let ctrlTimer;function revealCtrl(){const bar=document.getElementById('ctrlBar');if(bar&&slides.length){bar.classList.remove('hidden');const ab=document.getElementById('annoBar');if(ab)ab.classList.remove('dimOut');clearTimeout(ctrlTimer);ctrlTimer=setTimeout(()=>{if(playing){bar.classList.add('hidden');const ab2=document.getElementById('annoBar');if(ab2&&annoFolded)ab2.classList.add('dimOut')}},3000)}}
 document.addEventListener('mousemove',revealCtrl);
 document.addEventListener('touchstart',revealCtrl,{passive:true});
+
+// ═══════════════ 발표 중 주석 (색연필·메모) [2026-10-04, 사용자 요청] ═══════════════
+// 슬라이드 위 그리기(kind=draw, 슬라이드당 1세트 교체 저장) + 메모(kind=memo) + 음성오류 자동 기록
+// (kind=auto). 모든 기록은 서버 slide_annotations 테이블 + integrity/annotations.jsonl(폐루프)로.
+let currentPptId=null,annoMode=false,annoColor='#ff3b30';
+const annoStrokes={},annoMemos={},_annoAutoKeys=new Set();
+let _annoCur=null,_annoTimer=null;
+const _annoCv=document.getElementById('annoCanvas'),_annoBar=document.getElementById('annoBar');
+function _annoCtx(){const r=_annoCv.getBoundingClientRect();return r.width>40?r:null}
+function syncAnnoCanvas(){
+  const sc=document.getElementById('slideContent'),wrap=document.getElementById('slideWrap');
+  if(!sc||!wrap||!slides.length){_annoCv.style.display='none';return}
+  // [2026-10-05] 기준 rect = 슬라이드 캔버스(줌 transform 반영된 실제 화면 bbox) — 줌·이동해도
+  // 획이 슬라이드에 붙어 있고, 레터박스 여백에는 그려지지 않는다. 캔버스 없으면 기존처럼 slideContent.
+  const sr=((typeof _sCanvasEl==='function'&&_sCanvasEl())||sc).getBoundingClientRect(),wr=wrap.getBoundingClientRect();
+  const dpr=window.devicePixelRatio||1;
+  _annoCv.style.display='block';
+  _annoCv.style.left=(sr.left-wr.left)+'px';_annoCv.style.top=(sr.top-wr.top)+'px';
+  _annoCv.style.width=sr.width+'px';_annoCv.style.height=sr.height+'px';
+  _annoCv.width=Math.round(sr.width*dpr);_annoCv.height=Math.round(sr.height*dpr);
+  const c=_annoCv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);
+  redrawAnno();
+}
+function redrawAnno(extra){
+  const r=_annoCtx();if(!r)return;
+  const c=_annoCv.getContext('2d');c.clearRect(0,0,r.width,r.height);
+  const all=(annoStrokes[curSlideIdx]||[]).concat(extra?[extra]:[]);
+  for(const st of all){
+    c.strokeStyle=st.c;c.lineWidth=st.w;c.lineCap='round';c.lineJoin='round';c.beginPath();
+    st.pts.forEach((p,i)=>{const x=p[0]*r.width,y=p[1]*r.height;i?c.lineTo(x,y):c.moveTo(x,y)});
+    if(st.pts.length===1)c.arc(st.pts[0][0]*r.width,st.pts[0][1]*r.height,st.w/2,0,7),c.fillStyle=st.c,c.fill();
+    c.stroke();
+  }
+}
+function scheduleDrawSave(){
+  clearTimeout(_annoTimer);
+  _annoTimer=setTimeout(()=>flushAnnotation({slideIdx:curSlideIdx,kind:'draw',strokes:annoStrokes[curSlideIdx]||[]}),1200);
+}
+// PPT 자동저장(id 발급)이 늦을 수 있어(requestIdleCallback 최대 8s) — id 전 대기열 후 일괄 전송
+const _annoPending=[];
+function flushAnnotation(rec){
+  if(!currentPptId){_annoPending.push(rec);return}
+  apiJson('/ppt-agent/api/annotations',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pptId:currentPptId,...rec})}
+  ).catch(e=>dbg('주석 저장 실패: '+String(e.message||e).slice(0,40)));
+}
+function flushPendingAnnotations(){
+  while(_annoPending.length)flushAnnotation(_annoPending.shift());
+}
+_annoCv.addEventListener('pointerdown',e=>{
+  if(!annoMode)return;e.preventDefault();_annoCv.setPointerCapture(e.pointerId);
+  const r=_annoCtx();if(!r)return;
+  _annoCur={c:annoColor,w:3,pts:[[ (e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height ]]};
+});
+_annoCv.addEventListener('pointermove',e=>{
+  if(!_annoCur)return;const r=_annoCtx();if(!r)return;
+  const p=[(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height];
+  const st=_annoCur,lp=st.pts[st.pts.length-1];
+  if(Math.hypot((p[0]-lp[0])*r.width,(p[1]-lp[1])*r.height)<2.2)return;
+  st.pts.push(p);redrawAnno(st);
+});
+addEventListener('pointerup',()=>{
+  if(!_annoCur)return;
+  if(_annoCur.pts.length){(annoStrokes[curSlideIdx]||(annoStrokes[curSlideIdx]=[])).push(_annoCur);scheduleDrawSave();refreshSlideBadges()}
+  _annoCur=null;redrawAnno();
+});
+// 원본 renderSlide 감싸기 — 슬라이드 전환/리사이즈마다 캔버스·노트 동기화
+const _origRenderSlide=renderSlide;
+renderSlide=function(idx){_origRenderSlide(idx);requestAnimationFrame(()=>{syncAnnoCanvas();renderNoteBox()});
+  if(slides.length)_annoBar.classList.add('show')};
+// [2026-10-05] 뷰포트 변화(창 리사이즈·브라우저 확대/축소·사이드패널 토글)마다 슬라이드를 다시 fit.
+// 캔버스는 픽셀 고정 크라 옛 측정값으로 남으면 한쪽으로 쏠리는데, 항상 재계산해 중앙 정렬 유지.
+addEventListener('resize',()=>requestAnimationFrame(()=>{if(curSlideIdx>=0&&slides[curSlideIdx])renderSlide(curSlideIdx);syncAnnoCanvas()}));
+if(window.ResizeObserver){new ResizeObserver(()=>requestAnimationFrame(()=>{if(curSlideIdx>=0&&slides[curSlideIdx])renderSlide(curSlideIdx);syncAnnoCanvas()})).observe(document.getElementById('slideContent'))} // 사이드패널 토글처럼 window resize가 안 오는 컨테이너 변화까지 잡음
+
+// ── 캔버스 fit 감시 루프 [2026-10-05] ──
+// resize·ResizeObserver·토글 핸들러만으로는 사이드패널 margin 트랜지션(0.35s)의 '중간 크기'에 fit한
+// 캔버스가 최종 크기 보정을 놓치고 남는 순간이 있었다(캡처로 확인: 옛 크기 캔버스가 상단·우측 여백으로 남음).
+// 발표 중엔 매 프레임 캔버스 레이아웃 크기(offsetWidth — transform 줌의 영향 안 받음)와 기대 fit 크기를
+// 비교해 1px 초과 어긋나면 캔버스 w/h만 즉시 보정한다. innerHTML 재빌드 없음, 변화 없는 프레임은 비용 거의 0.
+(function fitWatch(){
+  function tick(){
+    try{
+      const el=document.getElementById('slideContent');
+      if(el&&el.classList.contains('canvasMode')&&curSlideIdx>=0&&slides[curSlideIdx]){
+        const cv=el.querySelector('.slideCanvas');
+        if(cv){
+          const m=(cv.style.aspectRatio||'').match(/^([\d.]+)\s*\/\s*([\d.]+)$/);
+          const [w,h]=_fitCanvasSize(el,m?+m[1]:16,m?+m[2]:9);
+          if(Math.abs(cv.offsetWidth-w)>1||Math.abs(cv.offsetHeight-h)>1){
+            cv.style.width=w+'px';cv.style.height=h+'px';
+            requestAnimationFrame(()=>{syncAnnoCanvas()});
+          }
+        }
+      }
+    }catch(_){}
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+
+// [2026-10-05] 🖼 채움 방식 토글 — 맞춤(비율 유지, 여백 허용) ↔ 꽉 채움(여백 0, 넘치는 가장자리 잘림)
+const _btnFit=document.getElementById('btnFit');
+function applyFitBtn(){if(!_btnFit)return;_btnFit.textContent=sFitMode==='cover'?'🖼 꽉 채움':'🖼 맞춤';_btnFit.title=sFitMode==='cover'?'화면에 꽉 채움 — 슬라이드 가장자리 일부가 잘릴 수 있음. 클릭하면 비율 맞춤':'비율 유지 — 화면 비율이 다르면 여백이 남음. 클릭하면 화면 꽉 채움'}
+function toggleFitMode(){sFitMode=sFitMode==='cover'?'contain':'cover';try{localStorage.setItem('pptFitMode',sFitMode)}catch(_){}applyFitBtn();if(curSlideIdx>=0&&slides[curSlideIdx])renderSlide(curSlideIdx)}
+if(_btnFit){_btnFit.onclick=toggleFitMode;applyFitBtn()}
+
+// ── 슬라이드 자체 확대/축소 [2026-10-05] ──
+// 브라우저 확대(Ctrl+±)는 화면을 꽉 채운 슬라이드를 물리적으로 더 크게 만들 수 없다(이미 전체 영역
+// 사용 중) — 그래서 "주변 패널·텍스트만 커지고 슬라이드는 그대로"로 보였다(사용자 불만). 발표 슬라이드
+// 전용 줌을 별도로 제공한다: 슬라이드 위 휠(트랙패드 핀치 포함)=확대/축소, 줌 상태에서 드래그=이동,
+// 더블클릭·0=리셋. 좌하단 칩에 배율 표시, 클릭해도 리셋. 주석 오버레이는 캔버스의 실제 rect(변환
+// 반영)를 따라가므로 줌해도 획이 슬라이드 위에 붙어 있다.
+function _sCanvasEl(){return document.querySelector('#slideContent .slideCanvas')}
+let _sZoom=1,_sPanX=0,_sPanY=0,_sDrag=null;
+function applySlideZoom(){
+  const cv=_sCanvasEl();
+  if(cv)cv.style.transform=_sZoom===1?'':`translate(${_sPanX.toFixed(1)}px,${_sPanY.toFixed(1)}px) scale(${_sZoom})`;
+  const chip=document.getElementById('zoomChip');
+  if(chip){chip.textContent=Math.round(_sZoom*100)+'%';chip.style.display=_sZoom!==1?'block':'none'}
+  requestAnimationFrame(()=>{syncAnnoCanvas()});
+}
+function resetSlideZoom(){_sZoom=1;_sPanX=0;_sPanY=0;applySlideZoom()}
+{
+  const _sc=document.getElementById('slideContent');
+  _sc.addEventListener('wheel',e=>{
+    if(!_sc.classList.contains('canvasMode'))return;
+    e.preventDefault();
+    // [2026-10-05] 40%~400% — 100% 미만 축소 허용. 자막 한 줄이 슬라이드와 겹칠 때 슬라이드를
+    // 줄이면 자막이 빈 배경 위에 뜨므로 겹침을 피할 수 있다(사용자 요청).
+    const k=e.deltaY<0?1.15:1/1.15,_nz=Math.min(4,Math.max(0.4,_sZoom*k));
+    if(_nz===_sZoom)return;
+    const f=_nz/_sZoom;_sPanX*=f;_sPanY*=f;_sZoom=_nz; // 팬도 같은 비율 — 화면 중심 기준 줌
+    if(_sZoom<=1){_sPanX=0;_sPanY=0} // fit 이하에선 팬 여유 없음 — 항상 상단 중앙 고정
+    applySlideZoom();
+  },{passive:false});
+  // [2026-10-05] 드래그 제스처 — 확대 상태(>100%)에선 이동(pan), 100% 이하에선 세로 드래그로 크기
+  // 조절: 아래로 끌면 축소, 위로 끌면 확대. 자막줄이 슬라이드에 겹칠 때 마우스로 슬라이드를 줄여
+  // 자막 자리를 확보하는 용도(사용자 요청). 주석 모드에선 그리기가 우선.
+  _sc.addEventListener('pointerdown',e=>{
+    if(annoMode||_sDrag)return;
+    try{_sc.setPointerCapture(e.pointerId)}catch(_){}
+    if(_sZoom>1){_sDrag={mode:'pan',x:e.clientX,y:e.clientY,px:_sPanX,py:_sPanY};_sc.style.cursor='grabbing'}
+    else{_sDrag={mode:'resize',y:e.clientY,z:_sZoom};_sc.style.cursor='ns-resize'}
+  });
+  addEventListener('pointermove',e=>{
+    if(!_sDrag)return;
+    if(_sDrag.mode==='pan'){_sPanX=_sDrag.px+(e.clientX-_sDrag.x);_sPanY=_sDrag.py+(e.clientY-_sDrag.y)}
+    else{_sZoom=Math.min(4,Math.max(0.4,_sDrag.z*Math.exp((_sDrag.y-e.clientY)/220)))} // 지수 스케일 — 부드럽고 방향 감각이 맞음
+    applySlideZoom();
+  });
+  addEventListener('pointerup',()=>{if(_sDrag){_sDrag=null;_sc.style.cursor=''}});
+  _sc.addEventListener('dblclick',resetSlideZoom);
+  // 슬라이드를 넘겨도 수동 조절한 배율 유지 — 매 슬라이드마다 다시 줄이지 않도록(자막 회피 용도).
+  // 새 캔버스엔 transform이 없으므로 렌더 직후 재적용. 리셋은 더블클릭·0키·칩 클릭으로만.
+  const _rsz=renderSlide;renderSlide=function(idx){_sDrag=null;_rsz(idx);applySlideZoom()};
+}
+// 툴바
+// [2026-10-05] 접기/펼치기 — 접으면 우측 끝에 반투명 🖍️ 핸들만 남음(발표 화면 비침 최소화).
+// 기본값은 접힘. 사용자가 펼치면 localStorage에 기억해 다음 발표에도 유지.
+let annoFolded=true;try{annoFolded=localStorage.getItem('annoFolded')!=='0'}catch(e){}
+const _annoFold=document.getElementById('annoFold');
+function applyAnnoFold(){_annoBar.classList.toggle('folded',annoFolded);
+  _annoFold.textContent=annoFolded?'🖍️':'›';
+  _annoFold.title=annoFolded?'주석 도구 펼치기':'주석 도구 숨기기';
+  try{localStorage.setItem('annoFolded',annoFolded?'1':'0')}catch(e){}}
+_annoFold.onclick=()=>{annoFolded=!annoFolded;applyAnnoFold()};
+applyAnnoFold();
+document.getElementById('annoToggle').onclick=()=>{annoMode=!annoMode;_annoCv.classList.toggle('on',annoMode);
+  document.getElementById('annoToggle').classList.toggle('on',annoMode);
+  setStatus(annoMode?'🖍️ 색연필 모드 — 슬라이드에 그리세요':'색연필 모드 해제');};
+document.querySelectorAll('#annoBar .dot').forEach(d=>d.onclick=()=>{annoColor=d.dataset.c;
+  document.querySelectorAll('#annoBar .dot').forEach(x=>x.classList.toggle('on',x===d));});
+document.getElementById('annoUndo').onclick=()=>{(annoStrokes[curSlideIdx]||[]).pop();redrawAnno();scheduleDrawSave();refreshSlideBadges()};
+document.getElementById('annoClear').onclick=()=>{annoStrokes[curSlideIdx]=[];redrawAnno();scheduleDrawSave();refreshSlideBadges()};
+document.getElementById('annoNoteBtn').onclick=()=>{document.getElementById('noteBox').classList.toggle('show');renderNoteBox()};
+document.getElementById('noteClose').onclick=()=>document.getElementById('noteBox').classList.remove('show');
+// ── 스피커노트 박스: 현재 슬라이드 대본/노트 표시 + 메모 인용 하이라이트 + 선택→메모 ──
+function renderNoteBox(){
+  const s=slides[curSlideIdx];if(!s)return;
+  document.getElementById('noteTitle').textContent='📜 스피커노트 — 슬라이드 '+(curSlideIdx+1);
+  const txt=s.script||s.note||(s.bullets||[]).join('. ')||s.title||'(내용 없음)';
+  const marks=[...(annoMemos[curSlideIdx]||[])].filter(m=>m.quote).map(m=>m.quote);
+  let html=esc(txt);
+  for(const q of marks){ // 인용 구절 하이라이트(첫 등장만)
+    const iq=esc(txt).indexOf(esc(q));
+    if(iq>=0&&!html.includes('<mark>'+esc(q)))html=html.replace(esc(q),'<mark>'+esc(q)+'</mark>');
+  }
+  const el=document.getElementById('noteText');el.innerHTML=html;
+}
+document.getElementById('noteText').addEventListener('mouseup',()=>{
+  const sel=String(window.getSelection()).trim();
+  if(sel.length>1)openMemoModal('스피커노트 수정',sel);
+});
+// ── 메모 모달 ──
+const _annoBg=document.getElementById('annoModalBg');
+document.getElementById('annoMemoBtn').onclick=()=>openMemoModal('슬라이드 수정','');
+function openMemoModal(cat,quote){
+  document.getElementById('annoSlideNum').textContent=curSlideIdx+1;
+  document.getElementById('annoCat').value=cat;
+  const q=document.getElementById('annoQuote');
+  q.style.display=quote?'block':'none';q.textContent=quote||'';
+  document.getElementById('annoQuoteLbl').style.display=quote?'block':'none';
+  document.getElementById('annoText').value='';
+  _annoBg.classList.add('show');
+  setTimeout(()=>document.getElementById('annoText').focus(),50);
+}
+document.getElementById('annoCancel').onclick=()=>_annoBg.classList.remove('show');
+_annoBg.addEventListener('click',e=>{if(e.target===_annoBg)_annoBg.classList.remove('show')});
+document.getElementById('annoSave').onclick=()=>{
+  const text=document.getElementById('annoText').value.trim();
+  if(!text){document.getElementById('annoText').focus();return}
+  const rec={kind:'memo',category:document.getElementById('annoCat').value,
+    quote:document.getElementById('annoQuote').style.display==='block'?document.getElementById('annoQuote').textContent:'',
+    text};
+  postAnnotation(rec).then(()=>_annoBg.classList.remove('show'));
+};
+function postAnnotation(rec){ // 로컬 반영 + 서버 저장(jsonl 적립은 서버가 함)
+  (annoMemos[curSlideIdx]||(annoMemos[curSlideIdx]=[])).push(rec);
+  renderNoteBox();refreshSlideBadges();
+  flushAnnotation({slideIdx:curSlideIdx,...rec});
+}
+// [2026-10-04] 음성 에이전트 오류 자동 기록 — 슬라이드당 1회(중복 스팸 방지), 발표자 손대지 않음
+function autoAnno(text){
+  if(!slides.length)return;
+  const key=curSlideIdx+':'+text.slice(0,24);
+  if(_annoAutoKeys.has(key))return;_annoAutoKeys.add(key);
+  postAnnotation({kind:'auto',category:'음성 오류',quote:'',text});
+}
+// ── 저장된 주석 불러오기(발표 PPT 로드 시) + 슬라이드 목록 배지 ──
+function loadAnnotations(){
+  Object.keys(annoStrokes).forEach(k=>delete annoStrokes[k]);
+  Object.keys(annoMemos).forEach(k=>delete annoMemos[k]);
+  _annoAutoKeys.clear();
+  if(!currentPptId)return;
+  apiJson('/ppt-agent/api/annotations/'+currentPptId).then(d=>{
+    for(const r of d.rows||[]){
+      if(r.kind==='draw'){if((r.strokes||[]).length)annoStrokes[r.slide_idx]=r.strokes}
+      else (annoMemos[r.slide_idx]||(annoMemos[r.slide_idx]=[])).push(r);
+    }
+    redrawAnno();renderNoteBox();refreshSlideBadges();
+  }).catch(()=>{});
+}
+function refreshSlideBadges(){
+  document.querySelectorAll('#slideList .sldItem').forEach((it,i)=>{
+    const n=(annoMemos[i]||[]).length+((annoStrokes[i]||[]).length?1:0);
+    let b=it.querySelector('.sldBadge');
+    if(n){if(!b){b=document.createElement('span');b.className='sldBadge';it.appendChild(b)}b.textContent=n}
+    else if(b)b.remove();
+  });
+}
 </script>
 </body>
 </html>

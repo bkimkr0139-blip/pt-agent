@@ -72,7 +72,31 @@ CREATE TABLE IF NOT EXISTS usage_events (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_usage_user_time ON usage_events(user_id, created_at);
+
+-- [2026-10-04, 사용자 요청] 발표 중 주석 — 색연필 드로잉(kind=draw, 조각 덮어쓰기) + 메모
+-- (kind=memo 수동 / kind=auto 음성오류 자동기록). strokes는 정규화 좌표([[x,y]...] 0~1) JSON.
+CREATE TABLE IF NOT EXISTS slide_annotations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ppt_id INTEGER NOT NULL REFERENCES presentations(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  slide_idx INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('draw','memo','auto')),
+  category TEXT,
+  quote TEXT,
+  text TEXT,
+  strokes TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_anno_ppt ON slide_annotations(ppt_id, slide_idx);
 `);
+
+// [2026-10-05, 사용자 요청] 지식 자동 습득 폐루프 — documents에 출처(origin)와 신뢰도(confidence)를
+// 둬서 "운영자가 올린 자료(manual, 1.0)"와 "QA 거절 질문을 클라우드로 답해 자동 임베딩한 지식
+// (auto, 0.5/불확실 0.3)"를 구분한다. 기존 DB엔 컬럼이 없으므로 없을 때만 1회 ALTER.
+for (const col of [['origin', "TEXT NOT NULL DEFAULT 'manual'"], ['confidence', 'REAL NOT NULL DEFAULT 1.0']]) {
+  const has = db.prepare('PRAGMA table_info(documents)').all().some(c => c.name === col[0]);
+  if (!has) db.prepare(`ALTER TABLE documents ADD COLUMN ${col[0]} ${col[1]}`).run();
+}
 
 // 최초 1회 마이그레이션 — 기존 users.json(있다면)을 그대로 가져옴. 같은 scrypt salt/hash를
 // 그대로 쓰므로 admin/bckim 계정 비밀번호 재설정 불필요.
