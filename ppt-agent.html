@@ -300,26 +300,31 @@ body.fs .main{height:100vh;height:100dvh}
       <button class="setBtn on" id="setScrOpenAI" onclick="setScriptEngine('openai')">☁️ OpenAI</button>
       <button class="setBtn" id="setScrLocal" onclick="setScriptEngine('local')">🧠 로컬</button></div>
     <div class="setRow"><span class="setLbl">TTS 엔진</span>
-      <button class="setBtn on" id="ttsOpenAI" onclick="setTtsEngine('openai')">☁️ OpenAI</button>
-      <button class="setBtn" id="ttsLocal" onclick="setTtsEngine('local')">🧠 로컬(무료)</button></div>
-    <div class="setRow" id="voiceRowOpenAI" style="flex-wrap:wrap"><span class="setLbl">발표자 목소리</span>
+      <button class="setBtn" id="ttsOpenAI" onclick="setTtsEngine('openai')">☁️ OpenAI</button>
+      <button class="setBtn on" id="ttsLocal" onclick="setTtsEngine('local')">🧠 로컬(무료)</button></div>
+    <div class="setRow" id="voiceRowOpenAI" style="display:none;flex-wrap:wrap"><span class="setLbl">발표자 목소리</span>
       <button class="setBtn" id="vAlloy" onclick="setVoice('alloy')" title="중성적, 차분함">Alloy</button>
       <button class="setBtn" id="vEcho" onclick="setVoice('echo')" title="남성, 부드러움">Echo</button>
       <button class="setBtn" id="vFable" onclick="setVoice('fable')" title="남성, 영국식 억양">Fable</button>
       <button class="setBtn" id="vOnyx" onclick="setVoice('onyx')" title="남성, 깊은 저음">Onyx</button>
-      <button class="setBtn on" id="vNova" onclick="setVoice('nova')" title="여성, 밝고 또렷함">Nova</button>
+      <button class="setBtn" id="vNova" onclick="setVoice('nova')" title="여성, 밝고 또렷함">Nova</button>
       <button class="setBtn" id="vShimmer" onclick="setVoice('shimmer')" title="여성, 부드럽고 따뜻함">Shimmer</button></div>
-    <div class="setRow" id="voiceRowLocal" style="display:none;flex-wrap:wrap"><span class="setLbl">로컬 보이스</span>
-      <button class="setBtn on" id="vDylan" onclick="setVoice('dylan')" title="남성, 또렷함">Dylan</button>
+    <div class="setRow" id="voiceRowLocal" style="flex-wrap:wrap"><span class="setLbl">로컬 보이스</span>
+      <button class="setBtn on" id="vSerena" onclick="setVoice('serena')" title="여성, 또렷함">Serena</button>
+      <button class="setBtn" id="vDylan" onclick="setVoice('dylan')" title="남성, 또렷함">Dylan</button>
       <button class="setBtn" id="vUncleFu" onclick="setVoice('uncle_fu')" title="남성, 낮고 묵직함">Uncle Fu</button>
       <button class="setBtn" id="vSohee" onclick="setVoice('sohee')" title="여성, 부드러움">Sohee</button>
-      <button class="setBtn" id="vSerena" onclick="setVoice('serena')" title="여성, 또렷함">Serena</button>
       <button class="setBtn" id="vVivian" onclick="setVoice('vivian')" title="여성, 밝음">Vivian</button></div>
     <!-- [2026-10-04] 발표 중 음성 명령(Q&A·배경대화 감지) 토글 — 기본 끔.
          켜면 발표 중 말하면 멈춰서 질문을 받고, 6초 침묵 후 이어서 진행. 끄면 끊김 없이 끝까지 재생. -->
     <div class="setRow"><span class="setLbl">🎤 발표 중 음성 명령</span>
       <button class="setBtn" id="micCmdOn" onclick="setMicCmd(true)" title="발표 중 말하면 멈추고 질문에 답합니다">켬 (질의응답)</button>
       <button class="setBtn on" id="micCmdOff" onclick="setMicCmd(false)" title="마이크를 끄고 끊김 없이 끝까지 재생">끔 (끊김 없음)</button></div>
+    <!-- [2026-10-06, 사용자 요청] 발표 하단 표시 토글 — 전체화면 발표 중 하단 캡션·컨트롤바가 시선을 빼앗는 문제.
+         끔(집중 모드, 기본): 캡션 숨김 + 컨트롤바는 마우스 움직임에만 3초 표시(정지 버튼 접근 유지). -->
+    <div class="setRow"><span class="setLbl">🖥️ 발표 하단 표시</span>
+      <button class="setBtn" id="hudOn" onclick="setHud(true)" title="하단 캡션과 컨트롤바를 표시합니다">켬</button>
+      <button class="setBtn on" id="hudOff" onclick="setHud(false)" title="캡션을 숨기고 컨트롤바는 마우스를 움직일 때만 잠깐 표시 — 발표 화면에 집중합니다">끔 (집중 모드)</button></div>
     <div class="setRow"><span class="setLbl">🗣️ 발표 속도</span>
       <input type="range" id="speedSlider" min="0.8" max="2" step="0.05" oninput="setTtsSpeed(this.value)" style="flex:1;accent-color:var(--pri)"/>
       <span id="speedVal" style="min-width:44px;text-align:right;font-size:.78rem;color:var(--txt2);font-weight:700"></span></div>
@@ -352,10 +357,18 @@ const OPENAI_SCRIPT='/ppt-agent/api/script';
 const TTS_URL='https://bc.wizbase.ai.kr/tts-api/v1/audio/speech';
 // [2026-10-04] 엔진/목소리를 localStorage에 저장·복원 — 재접속해도 마지막 설정 유지
 let scriptEngine='openai',ragEnabled=true;
-let ttsVoice='nova',ttsEngine='openai';
+let ttsVoice='serena',ttsEngine='local';  // [2026-10-06, 사용자 요청] 기본: 로컬(무료)+Serena — 저장된 설정이 있으면 아래에서 복원
 let micCmdEnabled=false;  // 발표 중 음성 명령(Q&A·배경대화 감지) — 기본 끔(끊김 없는 예측 가능한 재생)
 try{const sv=localStorage.getItem('ppt_agent_voice');if(sv)ttsVoice=sv}catch(e){}
 try{const se=localStorage.getItem('ppt_agent_tts_engine');if(se==='local'||se==='openai')ttsEngine=se}catch(e){}
+// [2026-10-06, 사용자 요청] 관리자가 승인 때 OpenAI(클라우드)를 허용하지 않은 계정 — 로컬 엔진 고정.
+// 서버가 주입한 window.__USER_PERM__({openai:bool}) 기준. 저장된 설정이 openai여도 강제 전환.
+if(window.__USER_PERM__&&!window.__USER_PERM__.openai){
+  try{localStorage.setItem('ppt_agent_tts_engine','local')}catch(e){}
+  ttsEngine='local';
+  const _ob=document.getElementById('ttsOpenAI');
+  if(_ob){_ob.style.display='none';_ob.title='관리자가 클라우드 엔진을 허용하지 않았습니다'}
+}
 // [2026-10-05 v9] 오래 열어둔 탭의 엔진 드리프트 방지 — 탭을 다시 보이게 하면 localStorage의 최신
 // 엔진·음성 설정을 메모리로 흡수한다. 실측(10:40 KST): openai 탭이 살아 있는 동안 설정을 local로
 // 바꿔도 낡은 탭이 계속 OpenAI 음성(영어 발음·다른 화자)을 내뱉어 "가끔 다른 목소리"가 섞였다.
@@ -369,6 +382,9 @@ document.addEventListener('visibilitychange',()=>{
   }catch(e){}
 });
 try{micCmdEnabled=localStorage.getItem('ppt_agent_mic_cmd')==='1'}catch(e){}
+let hudBottom=false;  // [2026-10-06] 발표 하단 표시(캡션·컨트롤바) — 기본 끔(집중 모드)
+try{hudBottom=localStorage.getItem('ppt_agent_hud')==='1'}catch(e){}
+let _presStarted=false;  // [2026-10-06] 발표 진행 중(재생+일시정지 포함) 표식 — 정지 후엔 컨트롤바를 계속 보여주기 위함
 let ttsSpeed=(()=>{try{const s=parseFloat(localStorage.getItem('ppt_agent_speed'));return s>=0.8&&s<=2?s:1.38}catch(e){return 1.38}})();
 function setTtsSpeed(v){ttsSpeed=+v;document.getElementById('speedVal').textContent=ttsSpeed.toFixed(2)+'x';try{localStorage.setItem('ppt_agent_speed',ttsSpeed)}catch(e){}updateSpeedTotalTime()}
 // [2026-09-29] 발표 속도 슬라이더 옆에 예상 총 발표 시간 표시 — 슬라이드별 실제 스크립트가
@@ -1662,7 +1678,7 @@ setInterval(()=>{
 // 질문문을 인용하는 순간 프리캐시가 불가능하고, 실측 [b0tm]에서 GPU 경합 6초 예산 미스로
 // 침묵의 한 축이 됐다. 전부 정적 프리캐시 추임새로 통일(PLAIN_FILLERS).
 let _plainFillerIdx=0;
-const PLAIN_FILLERS=['답변 드리겠습니다.','확인해 보겠습니다.','알겠습니다, 잠시만요.','바로 답변 드릴게요.'];  // [2026-10-05] "네," 접두 제거 — CACHED_PHRASES와 동일 사유(조기 EOS)
+const PLAIN_FILLERS=['확인해 보겠습니다.','알겠습니다, 잠시만요.'];  // [2026-10-06, 사용자 지적] "답변 드리겠습니다/바로 답변 드릴게요" 제외 — 추임새가 의도 멘트를 미리 말한 뒤 rag-miss 통보("지식이 없습니다…답변드리겠습니다")·동의 훅("답변 드리겠습니다")과 이중·삼중 발화됐다. 추임새는 중립만, "답변드릴게요"는 실제 답변 직전(동의 훅·브리지)에만 한 번 말한다. [2026-10-05] "네," 접두 제거 — CACHED_PHRASES와 동일 사유(조기 EOS)
 function nextPlainFiller(){return PLAIN_FILLERS[_plainFillerIdx++%PLAIN_FILLERS.length]}
 
 async function generateAnswer(q,ragPromise,stats){
@@ -2339,10 +2355,29 @@ async function renderSlideWhenReady(idx){
   if(curSlideIdx===idx)renderSlide(idx);
 }
 // 캡션 — 오디오 재생 시작 시점에 표시 (동기화)
+// [2026-10-06, 사용자 요청] 발표 하단 표시 토글 — 끔(집중 모드, 기본): 캡션(ticker)을 아예 숨기고
+// 컨트롤바는 마우스를 움직일 때만 3초 표시(revealCtrl 재사용 — 정지 버튼 접근 유지, 일시정지 중에도 재숨김).
+// 켬: 기존 동작(캡션 상시 표시).
+function setHud(v,silent){
+  hudBottom=!!v;
+  try{localStorage.setItem('ppt_agent_hud',hudBottom?'1':'0')}catch(e){}
+  const on=document.getElementById('hudOn'),off=document.getElementById('hudOff');
+  if(on)on.classList.toggle('on',hudBottom);
+  if(off)off.classList.toggle('on',!hudBottom);
+  if(silent)return;
+  if(!hudBottom){  // 즉시 숨김 — 캡션 + 재생 중 컨트롤바
+    const t=document.getElementById('ticker');if(t)t.style.display='none';
+    const b=document.getElementById('ctrlBar');if(b&&playing)b.classList.add('hidden');
+  }else{  // 켬 전환 — 캡션 즉시 복원 + 컨트롤바 3초 표시
+    const t=document.getElementById('ticker');if(t&&playing)t.style.display='flex';
+    revealCtrl();
+  }
+}
 function renderCaption(idx){
   const ticker=document.getElementById('ticker');
   const span=document.getElementById('tickerText');
   if(!ticker||!span)return;
+  if(!hudBottom){ticker.style.display='none';return}  // [2026-10-06] 집중 모드 — 캡션 숨김
   if(idx>=sentences.length){ticker.style.display='none';return}
   const text=sentences[idx];
   ticker.style.display='flex';
@@ -2360,6 +2395,7 @@ function showSearchIndicator(){
   const span=document.getElementById('tickerText');
   const ind=document.getElementById('searchIndicator');
   if(!ticker||!ind)return;
+  if(!hudBottom)return;  // [2026-10-06] 집중 모드 — 검색 표시도 숨김(음성 안내로 대체)
   ticker.style.display='flex';
   if(span)span.style.display='none';
   ind.classList.add('show');
@@ -2416,6 +2452,7 @@ const LOCAL_BROKEN_VOICES=['eric','ryan','aiden','ono_anna'];
 // 안 비우면 설정을 바꿔도 다음 한두 마디는 예전 목소리로 나가는 혼란이 생긴다.
 function invalidateVoiceCaches(){slides.forEach(s=>{s._audioCache=null;s._audioFetch=null});promptCache={}}  // [2026-10-04] _audioFetch(진행 중 요청 Promise)도 함께 폐기 — 이전 보이스로 변환 중이던 음성이 새 캐시에 유입되는 것 차단
 function setTtsEngine(m,silent){
+  if(m==='openai'&&window.__USER_PERM__&&!window.__USER_PERM__.openai)return;  // [2026-10-06] 미허용 계정 클라우드 엔진 진입 차단(콘솔·프로그램 호출 포함 방어)
   ttsEngine=m;
   try{localStorage.setItem('ppt_agent_tts_engine',m)}catch(e){}
   document.getElementById('ttsOpenAI').classList.toggle('on',m==='openai');
@@ -2456,6 +2493,7 @@ function setMicCmd(v){
     setVoice(ttsVoice,true);
   }catch(e){}
   try{setMicCmd(micCmdEnabled)}catch(e){}
+  try{setHud(hudBottom,true)}catch(e){}  // [2026-10-06] 하단 표시 설정 복원(silent — 부팅 시 컨트롤바 표시 안 함)
   // [2026-10-04] qaBox 클릭 = 수동 "계속" — 발표가 어떤 이유로 멈춰도 클릭 한 번으로 재개
   const qb=document.getElementById('qaBox');
   if(qb){qb.style.cursor='pointer';qb.title='클릭하면 발표를 계속 진행합니다';
@@ -2490,7 +2528,8 @@ async function startPresentation(){
 if(!acquirePresLock()){setStatus('⚠ 다른 창/탭에서 발표 진행 중 — 그 창을 닫거나 정지한 뒤 시작하세요');dbg('⚠ 발표 시작 거부 — 다른 창 락 보유 중('+((_presLockGet()||{}).id)+')');return}
 dbg('=== 발표 시작 (엔진:'+(ttsEngine==='local'?'로컬/'+ttsVoice:'OpenAI')+(micCmdEnabled?', 마이크 켬':', 마이크 끔')+') win='+_WIN_ID);
 unlockAudio();
-playing=true;interrupted=false;document.getElementById('btnPlay').textContent='⏸';await enterFS();if(micCmdEnabled)startListening();  // [2026-10-04] 음성 명령이 꺼져 있으면 마이크 아예 안 켬 — 배경대화 감지로 발표가 멈추는 일 원천 차단
+playing=true;interrupted=false;_presStarted=true;document.getElementById('btnPlay').textContent='⏸';await enterFS();if(micCmdEnabled)startListening();  // [2026-10-04] 음성 명령이 꺼져 있으면 마이크 아예 안 켬 — 배경대화 감지로 발표가 멈추는 일 원천 차단
+if(!hudBottom)setTimeout(()=>{const b=document.getElementById('ctrlBar');if(b&&playing)b.classList.add('hidden')},3000);  // [2026-10-06] 집중 모드 — 시작 3초 후 컨트롤바 자동 숨김(마우스를 안 움직여도)
 pregenPhrases();  // [2026-10-05] Q&A 문구 프리생성을 발표 '시작'으로 이동 — 기존엔 await presentSlide 뒤(=발표 종료 후)에 있어 발표 내내 캐시가 빈 상태로 첫 질문 시 설정 음성 생성을 기다려야 했다. 백그라운드(fire-and-forget)라 재생을 막지 않는다.
 // [2026-10-04] 시작과 동시에 전 슬라이드 스크립트를 백그라운드 '순차' 생성 — 이후 페이지 전환마다
 // LLM 대기가 없다(기존엔 다음 슬라이드 1개만 당겨서, 빠르게 넘기면 매번 "준비 중…" 정지).
@@ -2503,7 +2542,7 @@ slides.forEach((_,i)=>{_scriptChain=_scriptChain.then(()=>ensureScript(i)).catch
 await presentSlide(Math.max(curSlideIdx,0));
 }  // [2026-10-05] pregenPhrases 호출은 발표 '시작' 지점으로 이동 (아래 발표 종료 후 실행이던 호출은 발표 내내 캐시가 빈 원인이었다)
 function pausePresentation(){playing=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('일시정지');if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}  // [2026-10-04 v9] _audioFin 즉시 해제 — 120s 고아 감시자 방지
-function stopAll(){playing=false;interrupted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);_deferQA=null;_pendingQ=null;_qaGen++;_lastQ='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring')qaState='idle';resolveDeferred(false);setStatus('정지')}  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
+function stopAll(){playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);_deferQA=null;_pendingQ=null;_qaGen++;_lastQ='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring')qaState='idle';resolveDeferred(false);setStatus('정지')}  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
 // ── 마지막 슬라이드 발표 완료 → Q&A 시간 → URL 열기 ──
 let _closingTimer=null;
 function extractURL(){
@@ -2607,7 +2646,7 @@ document.addEventListener('keydown',e=>{if(e.key===' '&&slides.length){e.prevent
 if((e.key==='+'||e.key==='=')&&slides.length){_sZoom=Math.min(4,_sZoom*1.25);applySlideZoom()}
 if(e.key==='-'&&slides.length){_sZoom=Math.max(0.4,_sZoom/1.25);if(_sZoom<=1){_sPanX=0;_sPanY=0}applySlideZoom()}
 if(e.key==='0'&&slides.length)resetSlideZoom()});
-let ctrlTimer;function revealCtrl(){const bar=document.getElementById('ctrlBar');if(bar&&slides.length){bar.classList.remove('hidden');const ab=document.getElementById('annoBar');if(ab)ab.classList.remove('dimOut');clearTimeout(ctrlTimer);ctrlTimer=setTimeout(()=>{if(playing){bar.classList.add('hidden');const ab2=document.getElementById('annoBar');if(ab2&&annoFolded)ab2.classList.add('dimOut')}},3000)}}
+let ctrlTimer;function revealCtrl(){const bar=document.getElementById('ctrlBar');if(bar&&slides.length){bar.classList.remove('hidden');const ab=document.getElementById('annoBar');if(ab)ab.classList.remove('dimOut');clearTimeout(ctrlTimer);ctrlTimer=setTimeout(()=>{if(playing||(_presStarted&&!hudBottom)){bar.classList.add('hidden');const ab2=document.getElementById('annoBar');if(ab2&&annoFolded)ab2.classList.add('dimOut')}},3000)}}  // [2026-10-06] 집중 모드 — 발표 진행 중(일시정지 포함)에만 3초 뒤 재숨김, 정지 후엔 계속 표시
 document.addEventListener('mousemove',revealCtrl);
 document.addEventListener('touchstart',revealCtrl,{passive:true});
 

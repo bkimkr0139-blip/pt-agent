@@ -98,6 +98,13 @@ for (const col of [['origin', "TEXT NOT NULL DEFAULT 'manual'"], ['confidence', 
   if (!has) db.prepare(`ALTER TABLE documents ADD COLUMN ${col[0]} ${col[1]}`).run();
 }
 
+// [2026-10-06, 사용자 요청] 가입 승인 때 OpenAI(클라우드 TTS) 허용 여부를 관리자가 선택 —
+// 기존 계정은 1(허용)이라 시행 전과 동일. 0이면 발표 화면이 로컬 엔진으로 고정된다.
+{
+  const has = db.prepare('PRAGMA table_info(users)').all().some(c => c.name === 'allow_openai');
+  if (!has) db.prepare('ALTER TABLE users ADD COLUMN allow_openai INTEGER NOT NULL DEFAULT 1').run();
+}
+
 // 최초 1회 마이그레이션 — 기존 users.json(있다면)을 그대로 가져옴. 같은 scrypt salt/hash를
 // 그대로 쓰므로 admin/bckim 계정 비밀번호 재설정 불필요.
 function migrateFromJsonIfNeeded() {

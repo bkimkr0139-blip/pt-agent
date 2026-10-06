@@ -748,7 +748,7 @@ function adminPage(notice, activeTab = 'dash', opts = {}) {
     const label = { pending: '대기중', approved: '승인됨', disabled: '비활성', rejected: '거부됨' }[u.status] || u.status;
     return `<tr>
 <td>${esc(u.username)}</td>
-<td>${u.role === 'admin' ? '관리자' : '사용자'}</td>
+<td>${u.role === 'admin' ? '관리자' : '사용자'}${u.role !== 'admin' ? `<br><small style="color:${(u.allow_openai == null || u.allow_openai) ? '#7aa5f7' : '#a06a6a'}">☁️ OpenAI ${(u.allow_openai == null || u.allow_openai) ? '허용' : '차단'}</small>` : ''}</td>
 <td><span class="pill ${pill}">${label}</span></td>
 <td>${esc((u.created_at || '').slice(0, 10))}</td>
 <td><a href="${PREFIX}/admin/users/${u.id}/docs">${usage.docCount}</a></td>
@@ -757,7 +757,8 @@ function adminPage(notice, activeTab = 'dash', opts = {}) {
 <td>${usage.queryCount7d}</td>
 <td>${usage.lastActive ? esc(usage.lastActive.slice(0, 16).replace('T', ' ')) : '-'}</td>
 <td>
-${u.status === 'pending' ? `<form class="inline" method="post" action="${PREFIX}/admin/approve"><input type="hidden" name="username" value="${esc(u.username)}"><button class="actBtn" type="submit">승인</button></form>` : ''}
+${u.status === 'pending' ? `<form class="inline" method="post" action="${PREFIX}/admin/approve"><input type="hidden" name="username" value="${esc(u.username)}"><input type="hidden" name="openaiChoice" value="1"><label style="font-size:.68rem;color:#9a9ea8;display:inline-flex;align-items:center;gap:3px;margin-right:4px;cursor:pointer" title="체크 해제 시 이 계정은 클라우드(OpenAI) TTS를 쓸 수 없고 로컬 엔진만 사용합니다"><input type="checkbox" name="allowOpenai" value="1" checked style="vertical-align:middle">OpenAI</label><button class="actBtn" type="submit">승인</button></form>` : ''}
+${u.status === 'approved' && u.role !== 'admin' ? `<form class="inline" method="post" action="${PREFIX}/admin/users/openai-perm"><input type="hidden" name="username" value="${esc(u.username)}"><button class="actBtn" type="submit" style="background:#3a3a44" title="클라우드(OpenAI) TTS 허용 여부 전환 — 차단 시 로컬 엔진 고정">${(u.allow_openai == null || u.allow_openai) ? '☁️ 차단' : '☁️ 허용'}</button></form>` : ''}
 ${u.status === 'approved' && u.role !== 'admin' ? `<form class="inline" method="post" action="${PREFIX}/admin/deactivate"><input type="hidden" name="username" value="${esc(u.username)}"><button class="actBtn" type="submit" style="background:#8a6a20">비활성화</button></form>` : ''}
 ${u.status === 'disabled' ? `<form class="inline" method="post" action="${PREFIX}/admin/reactivate"><input type="hidden" name="username" value="${esc(u.username)}"><button class="actBtn" type="submit">재활성화</button></form>` : ''}
 ${u.username !== 'admin' ? `<form class="inline" method="post" action="${PREFIX}/admin/reject" onsubmit="return confirm('${esc(u.username)} 계정을 완전히 삭제할까요? 문서/PPT도 모두 삭제됩니다.')"><input type="hidden" name="username" value="${esc(u.username)}"><button class="actBtn" type="submit" style="background:#8a3030">삭제</button></form>` : ''}
@@ -837,7 +838,8 @@ ${req.user.role === 'admin' ? `<a href="${PREFIX}/admin">🛠️ 관리자 페�
 <a href="${PREFIX}/logout">🚪 로그아웃</a>
 </div>
 </div>
-<script>document.addEventListener('click',()=>{const m=document.getElementById('acctMenu');if(m)m.classList.remove('show')})</script>`;
+<script>document.addEventListener('click',()=>{const m=document.getElementById('acctMenu');if(m)m.classList.remove('show')})</script>
+<script>/* [2026-10-06] 계정 권한 주입 — OpenAI(클라우드 TTS) 미허용 계정은 발표 화면이 로컬 엔진으로 고정됨 */window.__USER_PERM__={openai:${req.user.role === 'admin' || Number(req.user.allow_openai == null ? 1 : req.user.allow_openai) === 1 ? 'true' : 'false'}};</script>`;
   const html = fs.readFileSync(PPT_HTML_PATH, 'utf8').replace('<!--USER_NAV-->', nav);
   // [2026-10-04] no-cache — 브라우저(Safari 등)가 HTML을 휴리스틱 캐싱해 이전 버전으로 계속 동작하는 사례 방지.
   // no-store가 아닌 no-cache: 매 요청 ETag 재검증만 하므로 트래픽 부담 없이 항상 최신 유지.
@@ -884,9 +886,21 @@ app.get(`${PREFIX}/admin`, requireAdmin, (req, res) => {
   res.send(adminPage(undefined, t));
 });
 app.post(`${PREFIX}/admin/approve`, requireAdmin, (req, res) => {
-  db.prepare("UPDATE users SET status='approved', approved_at=?, approved_by=? WHERE username=?")
-    .run(new Date().toISOString(), req.user.id, req.body.username);
-  res.send(adminPage(`${req.body.username} 승인 완료`, 'users'));
+  // [2026-10-06, 사용자 요청] 승인 시 OpenAI(클라우드 TTS) 허용 여부 선택 — 사용자 탭의 승인 폼엔
+  // 체크박스(openaiChoice 마커 있음)가 있고, 개요 탭의 간단 승인 폼은 마커가 없어 기본 허용(기존 동작).
+  const allow = req.body.openaiChoice ? (req.body.allowOpenai ? 1 : 0) : 1;
+  db.prepare("UPDATE users SET status='approved', approved_at=?, approved_by=?, allow_openai=? WHERE username=?")
+    .run(new Date().toISOString(), req.user.id, allow, req.body.username);
+  res.send(adminPage(`${req.body.username} 승인 완료 — OpenAI(클라우드) ${allow ? '허용' : '차단(로컬 전용)'}`, 'users'));
+});
+// 승인된 계정의 OpenAI 허용 여부 사후 토글 — 관리자 계정은 항상 허용이라 대상 아님.
+app.post(`${PREFIX}/admin/users/openai-perm`, requireAdmin, (req, res) => {
+  const u = findUserByUsername(String(req.body.username || ''));
+  if (!u || u.role === 'admin') return res.send(adminPage('관리자 계정은 항상 OpenAI가 허용됩니다.', 'users'));
+  const next = (u.allow_openai == null ? 1 : u.allow_openai) ? 0 : 1;
+  db.prepare('UPDATE users SET allow_openai=? WHERE id=?').run(next, u.id);
+  console.log(`[권한 변경] ${u.username} OpenAI ${next ? '허용' : '차단'} (by ${req.user.username})`);
+  res.send(adminPage(`${u.username} 계정의 OpenAI(클라우드 TTS)를 ${next ? '허용' : '차단'}했습니다${next ? '' : ' — 이 계정은 발표 화면에서 로컬 엔진으로 고정됩니다'}.`, 'users'));
 });
 app.post(`${PREFIX}/admin/deactivate`, requireAdmin, (req, res) => {
   db.prepare("UPDATE users SET status='disabled' WHERE username=? AND role!='admin'").run(req.body.username);
