@@ -482,6 +482,7 @@ async function pregenPhrases(){
 }
 async function speakUnified(text){
   if(!text)return;
+  unduckVol();  // [2026-10-06 사용자 지정] 시스템 발화 시작 — 원래 볼륨으로 회복해 답변
   noteSpoken(text);  // 에코 방지용 기록
   let u=promptCache[text];
   if(u)return playAudio(u);
@@ -490,7 +491,7 @@ async function speakUnified(text){
   // 시 이국 억양 목소리가 나오던 원인. 프리캐시 미스 시 설정 음성 생성을 짧게 대기하고, 그 안에
   // 못 나오면 음성 없이 상태 바 텍스트로 대체. 늦게 완성된 음성은 캐시에 적재해 다음엔 즉시 재생.
   const _t0=Date.now();
-  const gen=enqueueTts(text,true).then(v=>{if(v){promptCache[text]=v;return v}return null}).catch(()=>null);
+  const gen=enqueueTts(text,true,null,true).then(v=>{if(v){promptCache[text]=v;return v}return null}).catch(()=>null);  // v=true — 발화 언어 역검증(프록시) 대상
   u=await Promise.race([gen,new Promise(r=>setTimeout(()=>r(null),QA_TTS_WAIT_MS))]);
   qaLog('unified_tts',{phrase:text.slice(0,40),wait_ms:Date.now()-_t0,ok:!!u});
   if(u)return playAudio(u);
@@ -1068,9 +1069,9 @@ function ensureScript(idx){
 // 큐 맨 뒤로 가서 프리페치 10여 개+백로그 뒤에 줄서 몇 분씩 대기하는 블랙홀이 있었다(실측:
 // 첫 문장 재생까지 3분 15초). front=true면 큐 선두로 — 재시도와 대화 멘트가 프리페치를 끼어든다.
 let _ttsQ=[],_ttsRunning=false,_ttsCur=null;  // _ttsCur: 인플라이트 1건 — 중단(abort) 대상 추적
-function enqueueTts(text,front,tag){
+function enqueueTts(text,front,tag,v){  // v: [2026-10-06] 발화 언어 역검증(프록시 ASR 게이트) 대상 — 답변·시스템 멘트만
   return new Promise((res,rej)=>{
-    const j={text,res,rej,tag,ac:new AbortController()};
+    const j={text,res,rej,tag,v,ac:new AbortController()};
     if(front)_ttsQ.unshift(j);else _ttsQ.push(j);
     _pumpTts();
   });
@@ -1103,7 +1104,7 @@ async function _pumpTts(){
   if(_ttsRunning)return;_ttsRunning=true;
   while(_ttsQ.length){
     const j=_ttsQ.shift();_ttsCur=j;
-    try{j.res(await ttsSentence(j.text,j.ac.signal))}catch(e){j.rej(e)}
+    try{j.res(await ttsSentence(j.text,j.ac.signal,{verify:!!j.v}))}catch(e){j.rej(e)}
     _ttsCur=null;
   }
   _ttsRunning=false;
@@ -1294,7 +1295,8 @@ function koNizeTts(text){
 // [2026-10-05 v2] signal — 직렬 큐가 폐기(purge) 시 인플라이트 요청을 즉시 중단할 수 있게 하는
 // 외부 중단 신호(19:08 고장: 44.5s 프리페치 사슬이 Q&A 음성을 전부 굶겨 침묵). 신호가 끊기면
 // 진행 중 fetch가 즉시 거부되고, ttsSentence는 기존 정책대로 null 반환(재요청은 발표 재개 시).
-async function ttsSentence(text,signal){if(!text||text.length<3)return null;
+async function ttsSentence(text,signal,opts){if(!text||text.length<3)return null;
+const _verify=!!(opts&&opts.verify);  // [2026-10-06] 답변·멘트는 프록시에서 ASR 역검증 — qwen3 TTS가 한국어 텍스트를 중국어로 발음한 실측([me57] 날씨 즉답) 재발 방지
 const _t0=Date.now();
 try{
   if(ttsEngine==='openai'){
@@ -1319,7 +1321,7 @@ try{
   let r;
   try{
     r=await fetch(TTS_URL,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16',input:koNizeTts(text),voice:ttsVoice,language:'ko',response_format:'wav',instruct:STYLE,temperature:0.15,repetition_penalty:1.15}),signal:ac.signal});  // [2026-10-05] 0.3→0.15 — 재시도·조각마다 온도가 달라 화자 특성이 흔들리는(남성음 스침) 드리프트 완화: 1차 시도와 재시도 온도를 통일. [2026-10-05 v8] repetition_penalty 1.15 — EOS 미스 grind(동일 문장 33~39% 빈도로 max_tokens 캡까지 무음 생성, 실측 96s 캡 도달)를 28/28샘플 완전 제거, 정상 생성 속도·길이 무영향
+      body:JSON.stringify({model:'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16',input:koNizeTts(text),voice:ttsVoice,language:'ko',response_format:'wav',instruct:STYLE,temperature:0.15,repetition_penalty:1.15,verify_lang:_verify}),signal:ac.signal});  // [2026-10-05] 0.3→0.15 — 재시도·조각마다 온도가 달라 화자 특성이 흔들리는(남성음 스침) 드리프트 완화: 1차 시도와 재시도 온도를 통일. [2026-10-05 v8] repetition_penalty 1.15 — EOS 미스 grind(동일 문장 33~39% 빈도로 max_tokens 캡까지 무음 생성, 실측 96s 캡 도달)를 28/28샘플 완전 제거, 정상 생성 속도·길이 무영향
   }catch(e){dbg('TTS[local] '+e.name+(ac.signal.aborted?'('+(TTS_TIMEOUT_MS/1000)+'s타임아웃)':'')+':'+(e.message||'').slice(0,40));throw e}
   finally{clearTimeout(to)}
   if(!r.ok){
@@ -1333,7 +1335,7 @@ try{
       if(signal)signal.addEventListener('abort',()=>ac2.abort(),{once:true});
       try{
         const r2=await fetch(TTS_URL,{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({model:'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16',input:koNizeTts(text),voice:ttsVoice,language:'ko',response_format:'wav',instruct:STYLE,temperature:0.15,repetition_penalty:1.15}),signal:ac2.signal});
+          body:JSON.stringify({model:'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16',input:koNizeTts(text),voice:ttsVoice,language:'ko',response_format:'wav',instruct:STYLE,temperature:0.15,repetition_penalty:1.15,verify_lang:_verify}),signal:ac2.signal});
         if(r2.ok){const b2=await r2.blob();if(b2.size>1000&&b2.size<4000000){const _dt=Date.now()-_t0;if(playing)_presLockSet();dbg('TTS[local] OK(재시도) '+b2.size+'B '+_dt+'ms'+(_dt>=5000?' ⚠지연':''));return URL.createObjectURL(b2)}console.warn('TTS(local) 재시도: 응답 크기 이상',b2.size)}
         else{console.warn('TTS(local) 재시도 실패:',r2.status);dbg('TTS[local] 재시도 HTTP'+r2.status)}
       }catch(e2){dbg('TTS[local] 재시도 '+e2.name+':'+(e2.message||'').slice(0,40))}
@@ -1345,6 +1347,19 @@ try{
 dbg('TTS[local] OK '+b.size+'B '+_dt+'ms'+(_dt>=5000?' ⚠지연':''));if(_dt>=5000)qaLog('tts_slow',{ms:_dt,chars:text.length,size:b.size});return URL.createObjectURL(b)}console.warn('TTS(local): 응답 크기 이상',b.size);dbg('TTS[local] 크이상 '+b.size+'B')
 }catch(e){console.warn('TTS 예외:',e);dbg('TTS 예외:'+(e.message||e.name||'').slice(0,50))}
 dbg('TTS 변환 실패 — 이 문장은 건너뜀(브라우저 폴백 없음)');return null}
+// ── [2026-10-06 사용자 지정] 발화 감지 볼륨 더킹 ──
+// 발표 재생 중 사용자 발화(interim)가 감지되면 출력 볼륨을 살짝 낮추고(×0.7), 그 발화가
+// 질문·명령으로 확정되면 현재 값의 50%(×0.5)로 더 낮춰 STT로 되들어가는 에코를 억제한다.
+// 시스템이 답변·멘트를 말하기 시작하면(speakUnified·speakQaAnswer) 즉시 원래 값(1.0)으로
+// 회복한다. 발화 종료 3초 뒤 자동 해제 — 레벨 2는 회복 경로 누락 대비 12초 안전망.
+let _duckLevel=0,_duckTimer=null;
+function applyDuckVol(){if(audioEl)audioEl.volume=(_duckLevel===2?0.5:(_duckLevel===1?0.7:1))}
+function duckVol(level){
+  if(_duckLevel<level){_duckLevel=level;applyDuckVol()}
+  clearTimeout(_duckTimer);  // 같은 레벨 재감지에도 타이머 연장 — 말이 이어지는 동안 유지
+  _duckTimer=setTimeout(()=>{_duckLevel=0;applyDuckVol()},_duckLevel===2?12000:3000);
+}
+function unduckVol(){clearTimeout(_duckTimer);if(_duckLevel){_duckLevel=0;applyDuckVol()}}
 function playAudio(url){return new Promise(r=>{
   dbg('재생 모듈 진입 — '+(url?'url 있음':'url 없음'));
   if(!url){r();return}
@@ -1354,6 +1369,7 @@ function playAudio(url){return new Promise(r=>{
   if(_audioFin)_audioFin('교체');
   if(audioEl){audioEl.pause();audioEl=null}
   audioEl=new Audio();
+  audioEl.volume=(_duckLevel===2?0.5:(_duckLevel===1?0.7:1));  // [2026-10-06 사용자 지정] 생성 시점 더킹 레벨 반영
   ttsSpeaking=true;
   // [2026-10-04] 감시자 — canplay/onended/onerror 중 무엇도 안 오는 Chrome 상태에서 재생 체인이
   // 영원히 멈추는 것을 방지. 정상 종료든 타임아웃이든 딱 한 번만 해제된다.
@@ -1474,7 +1490,18 @@ recognizer.onerror=(e)=>{
 recognizer.onresult=e=>{
   _sttLastEvt=Date.now();  // interim 포함 어떤 결과든 인식기 살아있음의 증거
   for(let i=e.resultIndex;i<e.results.length;i++){
-    const r=e.results[i];if(!r.isFinal)continue;
+    const r=e.results[i];
+    // [2026-10-06 사용자 지정] 볼륨 더킹 — interim이 사용자 발화 시작의 가장 빠른 신호. 재생 중
+    // 실제 발화로 보이는 interim이면 출력을 살짝 낮춘다. TTS 잔향만 날아올 땐(에코 판정) 낮추지
+    // 않고, 내레이션 꼬리+사용자 발화 합침은 접두 절단 후 잔여로 판단한다.
+    if(!r.isFinal){
+      const _it=(r[0].transcript||'').trim();
+      if(_it&&_it.replace(/\s/g,'').length>=2&&(playing||ttsSpeaking)){
+        let _c=isEcho(_it)?(typeof stripEchoPrefix==='function'&&_it.length>=12?stripEchoPrefix(_it):''):_it;
+        if(_c&&_c.replace(/\s/g,'').length>=2&&!isHall(_c)&&!isEcho(_c))duckVol(1);
+      }
+      continue;
+    }
     let t=r[0].transcript.trim();  // [2026-10-05 v9b] let — 에코 접두 절단으로 질문 본문만 남길 수 있음
     // [2026-10-05] 원격 진단 — 최종 인식분을 서버 dbg로 적립(마이크가 뭘 들었는지 로그로 재구성)
     dbg('🎙 "'+t.slice(0,30)+'"');
@@ -1941,7 +1968,7 @@ async function deferRecheck(){
             // [2026-10-05 v6.1] 제안 멘트를 ready 시점에 즉시 프리생성 — "발표를 잠시 멈추고" 물어야
             // 하므로 다음 문장 경계(수 초 내)까지 완성돼 있어야 한다. 동적 문장(질문 내용 포함)이라
             // 이 시점 개별 생성, 큐 꼬리(발표 프리페치 뒤)라 재생에는 영향 없다.
-            enqueueTts(offerTextAll(d),false,'prefetch').catch(()=>{});
+            enqueueTts(offerTextAll(d),false,'prefetch',true).catch(()=>{});  // v=true — 제안 멘트도 언어 역검증
             setStatus('🧠 아까 질문의 답변 준비 완료 — 잠시 후 말씀드리겠습니다');
             dbg('🧠 지연 답변 준비 완료 — 다음 문장 경계에서 일시정지·제안');
           }
@@ -2174,25 +2201,27 @@ async function answerVolatile(q,gen){
 // 이후 문장은 앞 문장 재생 중 병렬 생성해 이어서 재생.
 async function speakQaAnswer(text){
   const _t0=Date.now();
+  unduckVol();  // [2026-10-06 사용자 지정] 답변 재생 시작 — 원래 볼륨으로 회복
   const parts=scriptToSentences(text).map(p=>p.t);
   if(!parts.length)parts.push(text);
+  parts.forEach(p=>noteSpoken(p));  // [2026-10-06] 답변 문장도 에코 윈도우에 적재 — 답변 잔향이 interim 더킹·에코 판정을 오작동하지 않게
   // [2026-10-05 v7] 후속 문장을 첫 문장 '대기 전'에 적재 — 첫 문장이 확률적 생성 지연(동일 문장
   // 2.3s vs 10.1s 실측 grind)에 빠져도 2번째 이후 생성이 바로 이어지도록 파이프라인을 먼저 당긴다.
   // 기존엔 첫 문장 확정 후 적재해 첫 문장이 늦으면 후속 전부가 연쇄 지연됐다. 선두 삽입 역순 적재라
   // 큐 순서는 [1,2,3,…] 유지.
   const pend=[];
-  for(let i=parts.length-1;i>=1;i--)pend.push(enqueueTts(parts[i],true,'qa').catch(()=>null));
+  for(let i=parts.length-1;i>=1;i--)pend.push(enqueueTts(parts[i],true,'qa',true).catch(()=>null));
   // [2026-10-05 v7] 첫 문장 침묵 완화 — 생성 첫 바이트는 완성 시점에만 도착(스트리밍 컷 불가 확인)하므로
   // 클라이언트에서 커버한다: 2.5초 내 미완성이면 프리캐시 브리지 멘트로 침묵을 메우고, 총 예산(20s) 내
   // 계속 대기. 실측 grind(10~13s)도 브리지+후속 파이프라인으로 답변 시작이 들린다.
-  let first=await Promise.race([enqueueTts(parts[0],true,'qa').catch(()=>null),
+  let first=await Promise.race([enqueueTts(parts[0],true,'qa',true).catch(()=>null),
     new Promise(r=>setTimeout(()=>r(null),2500))]);
   let bridge=false;
   if(!first){
     bridge=true;
     dbg('⏳ 답변 첫 문장 지연 — 브리지 멘트로 침묵 메움');
     await speakUnified('바로 답변 드릴게요.').catch(()=>{});
-    first=await Promise.race([enqueueTts(parts[0],true,'qa').catch(()=>null),
+    first=await Promise.race([enqueueTts(parts[0],true,'qa',true).catch(()=>null),
       new Promise(r=>setTimeout(()=>r(null),ANSWER_TTS_WAIT_MS))]);
   }
   qaLog('answer_tts',{ms:Date.now()-_t0,ok:!!first,wait_timeout:!first,bridge:bridge,parts:parts.length,chars:(text||'').length});
@@ -2221,6 +2250,7 @@ async function speakQaAnswer(text){
 
 async function handleInterruption(q,fromClosing){
   const gen=++_qaGen;  // [2026-10-05 v9] 세대 가드 — 새 인터럽트/정지가 오면 낡은 인스턴스의 상태 기록을 막는다
+  duckVol(2);  // [2026-10-06 사용자 지정] 질문·명령 확정 — 에코 재유입 억제 위해 50%까지 낮춤. 시스템 발화 시작 시 즉시 원래 값 회복
   // ── 0ms: 즉시 음성 정지 ──
   interrupted=true;
   if(audioEl){audioEl.pause();audioEl=null}
@@ -2468,6 +2498,7 @@ function scheduleWaitQTimer(isExtend){
   },12000);
 }
 async function resumeFromInterrupted(){
+  unduckVol();  // [2026-10-06 사용자 지정] 발화 끝나고 발표 재개 — 볼륨 원복
   interrupted=false;
   document.getElementById('qaBox').style.display='none';
   setStatus('▶ 발표 재개 — 끊긴 문장부터 다시');
@@ -2917,7 +2948,7 @@ slides.forEach((_,i)=>{_scriptChain=_scriptChain.then(()=>ensureScript(i)).catch
 await presentSlide(Math.max(curSlideIdx,0));
 }  // [2026-10-05] pregenPhrases 호출은 발표 '시작' 지점으로 이동 (아래 발표 종료 후 실행이던 호출은 발표 내내 캐시가 빈 원인이었다)
 function pausePresentation(){playing=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('일시정지');if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}  // [2026-10-04 v9] _audioFin 즉시 해제 — 120s 고아 감시자 방지
-function stopAll(){playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);_deferQA=null;_deferPending=[];_deferAskedAt=0;_pendingQ=null;_qaGen++;_lastQ='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring')qaState='idle';resolveDeferred(false);setStatus('정지')}  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
+function stopAll(){playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);unduckVol();_deferQA=null;_deferPending=[];_deferAskedAt=0;_pendingQ=null;_qaGen++;_lastQ='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring')qaState='idle';resolveDeferred(false);setStatus('정지')}  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
 // ── 마지막 슬라이드 발표 완료 → Q&A 시간 → URL 열기 ──
 let _closingTimer=null;
 function extractURL(){
