@@ -1348,6 +1348,10 @@ dbg('TTS 변환 실패 — 이 문장은 건너뜀(브라우저 폴백 없음)')
 function playAudio(url){return new Promise(r=>{
   dbg('재생 모듈 진입 — '+(url?'url 있음':'url 없음'));
   if(!url){r();return}
+  // [2026-10-06 42wp] 이전 인스턴스 감시자 정리 — 인터럽트 경로들이 audioEl을 _audioFin 호출 없이
+  // pause()만 하면 이전 hardTo(120s)가 산 채로 남아 120초 뒤 현직 재생의 프로미스를 조기 귀결시킨다
+  // (실측 [42wp] 7회 발화 — +453.9s엔 브리지 멘트가 0.2s 만에 잘렸다). 교체 직전 귀결·해제로 봉쇄.
+  if(_audioFin)_audioFin('교체');
   if(audioEl){audioEl.pause();audioEl=null}
   audioEl=new Audio();
   ttsSpeaking=true;
@@ -1891,11 +1895,27 @@ function captureIssue(q){
 // 기존의 "다시 질문해 주세요" 즉석 안내는 이 제안 방식으로 대체(청중 앞 재요청 부담 제거).
 const KNOWLEDGE_RECHECK_MS=25000;  // 재확인 폴링 간격 — 클라우드 답변+임베딩 왕복(수 초~수십 초) 감안
 const DEFER_MAX_TRIES=8;           // 25s×8≈3분 20초 — 이 안에 습득 미확인이면 제안 조용히 취소
-let _knowRecheckTimer=null,_deferQA=null,_deferTimer=null,_deferResolve=null,_deferAskedAt=0;  // _deferAskedAt: [2026-10-06] 마지막 제안(동의 질문) 시각 — 늦은 "네" 유예 판정 기준
+let _knowRecheckTimer=null,_deferQA=null,_deferTimer=null,_deferResolve=null,_deferAskedAt=0,_deferPending=[];  // _deferAskedAt: [2026-10-06] 마지막 제안(동의 질문) 시각 — 늦은 "네" 유예 판정 기준. _deferPending: [2026-10-06 42wp] 답변 준비된 지연 답변 대기열
 function startDeferredQA(q){
   clearTimeout(_knowRecheckTimer);
+  // [2026-10-06 42wp] 미전달 지연 답변 보존 — 새 질문이 답변 준비된 활성 슬롯을 무음으로 덮어써
+  // 기존 답변이 영영 유실됐다(실측 [42wp]: 서울항공화물 ready → 59초 뒤 DB튜닝 질문이 슬롯 교체,
+  // 전달 기록 없음). 준비된 답변은 대기열로 옮겨 합동 제안("A, 그리고 B")·순차 전달한다.
+  if(_deferQA&&_deferQA.answer&&(_deferQA.status==='ready'||_deferQA.status==='asked')){
+    _deferPending.push(_deferQA);
+    if(_deferPending.length>2){const drop=_deferPending.shift();dbg('⚠ 대기 답변 3건 초과 — 최고령 폐기: "'+drop.q.slice(0,20)+'"')}
+    dbg('🧠 대기 답변 보존 — 대기열 '+_deferPending.length+'건, 새 질문 습득 시작');
+  }
   _deferQA={q:String(q).slice(0,300),status:'acquiring',tries:0,answer:null,started:Date.now()};
   deferRecheck();
+}
+// [2026-10-06 42wp] 활성 슬롯이 비었으면 대기열의 준비된 답변을 승격 — 경계 훅이 이어서 제안한다.
+// [42wp] 실측처럼 새 질문 유입으로 버려지던 미전달 답변의 회수 경로.
+function promoteDeferred(){
+  while(!_deferQA&&_deferPending.length){
+    const p=_deferPending.shift();
+    if(p&&p.answer){_deferQA=p;dbg('🧠 대기 답변 승격 — "'+p.q.slice(0,20)+'"');break}
+  }
 }
 async function deferRecheck(){
   const d=_deferQA;if(!d||d.status!=='acquiring')return;
@@ -1915,13 +1935,13 @@ async function deferRecheck(){
           if(qaState==='closing_qa'){  // 발표 종료 후 Q&A 중 완성 — 슬라이드 훅이 없으니 즉시 제공
             d.status='asked';
             dbg('🧠 지연 답변 — Q&A 시간에 즉시 제공');
-            speakUnified(offerText(d.q)).catch(()=>{}).then(()=>speakQaAnswer(_a).catch(()=>{}));
+            speakUnified(offerTextAll(d)).catch(()=>{}).then(()=>speakDeferredAnswers(d,()=>true,'closing_qa').catch(()=>{}));
           }else{
             d.status='ready';
             // [2026-10-05 v6.1] 제안 멘트를 ready 시점에 즉시 프리생성 — "발표를 잠시 멈추고" 물어야
             // 하므로 다음 문장 경계(수 초 내)까지 완성돼 있어야 한다. 동적 문장(질문 내용 포함)이라
             // 이 시점 개별 생성, 큐 꼬리(발표 프리페치 뒤)라 재생에는 영향 없다.
-            enqueueTts(offerText(d.q),false,'prefetch').catch(()=>{});
+            enqueueTts(offerTextAll(d),false,'prefetch').catch(()=>{});
             setStatus('🧠 아까 질문의 답변 준비 완료 — 잠시 후 말씀드리겠습니다');
             dbg('🧠 지연 답변 준비 완료 — 다음 문장 경계에서 일시정지·제안');
           }
@@ -1948,6 +1968,33 @@ function offerText(q){
   if(!s)s='아까 질문';
   return '조금 전에 질문하신 '+s+'에 대하여 답변 드려도 될까요?';
 }
+// [2026-10-06 42wp] 대기열 합동 제안문 — 활성+대기열의 준비된 답변을 한 문장으로 묶는다.
+// 질문 인용은 조사까지 잘릴 수 있으므로("…어떤 것을") "에 대하여" 대신 머리명사로 받는다 —
+// "조금 전에 질문하신 A, 그리고 B, N가지 모두에 답변 드려도 될까요?" 각 질문은 첫 문장 20자로
+// 잘라 TTS 길이를 제한한다. 준비된 답변이 1건이면 기존 offerText와 동일.
+function offerTextAll(d){
+  const items=[d,..._deferPending].filter(x=>x&&x.answer);
+  if(items.length<2)return offerText(d&&d.q);
+  const names=items.map(x=>{const s=String(x.q||'').replace(/\s+/g,' ').split(/[.!?…]/)[0].trim().slice(0,20).trim();return s||'아까 질문'});
+  return '조금 전에 질문하신 '+names.join(', 그리고 ')+', '+items.length+'가지 모두에 답변 드려도 될까요?';
+}
+// [2026-10-06 42wp] 준비된 지연 답변(첫 항목+대기열)을 '답변 드리겠습니다.' 이후 순차 재생하고
+// 건별 qa 기록. alive()가 거짓(새 질문·정지)이 되면 미전달 항목을 대기열에 되돌려 다음 경계에서
+// 다시 제안된다. via/extra는 진단용 qa 필드.
+async function speakDeferredAnswers(first,alive,via,extra){
+  const items=[first,..._deferPending].filter(x=>x&&x.answer);
+  _deferPending=[];
+  let n=0;
+  for(let i=0;i<items.length;i++){
+    if(!alive()){_deferPending=items.slice(i).concat(_deferPending);return n}
+    const it=items[i];
+    await speakQaAnswer(it.answer);
+    n++;
+    qaLog('deferred_answer',Object.assign({via:via||'defer',waitMs:Date.now()-it.started,chars:(it.answer||'').length},extra||{}));
+    qaFlushLog(Object.assign({state:'deferred_answer',q:it.q,waitMs:Date.now()-it.started},extra||{}));
+  }
+  return n;
+}
 // 발표 도중(섹션 경계 — 슬라이드 서술 종료 후 전환 전)에서 호출 — 동의("네")면 true,
 // 거절·무응답(8초)이면 false로 귀결
 function offerDeferredAnswer(){
@@ -1958,7 +2005,7 @@ function offerDeferredAnswer(){
     _deferResolve=resolve;
     qaState='deferring';
     setStatus('💬 답변 제안 — "네" 또는 "다음으로"');
-    speakUnified(offerText(d.q)).then(()=>{
+    speakUnified(offerTextAll(d)).then(()=>{
       clearTimeout(_deferTimer);
       _deferTimer=setTimeout(deferOfferExpiry,8000);  // [2026-10-06] 공용 만료 — 1차 재제안, 2차 조용히 만료
     });
@@ -2014,7 +2061,8 @@ function deferOfferExpiry(){
     dbg('⏱ 답변 제안 무응답(1차) — 45초 유예 후 문장 경계에서 한 번 더 물어봄');
     return;
   }
-  if(d&&d.status==='asked')d.status='expired';
+  if(d&&d.status==='asked'){d.status='expired';
+    if(_deferPending.length){dbg('⚠ 대기 답변 '+_deferPending.length+'건 동반 만료 — 무응답 2회');_deferPending=[]}}
   // _deferAskedAt는 의도적으로 0으로 끄지 않는다 — 만료 직후 도착하는 늦은 "네"를 30초 유예 안에서
   // 받기 위함(onresult 선처리 게이트). 사용자가 조용히 넘어가면 30초 뒤 게이트가 저절로 꺼진다.
   dbg('⏱ 답변 제안 무응답 — 다음 진행');
@@ -2037,9 +2085,7 @@ async function deliverDeferredNow(){
   setStatus('💬 대기 질문 답변 재생');
   await speakUnified('답변 드리겠습니다.');
   if(g!==_qaGen||!playing)return;
-  await speakQaAnswer(d.answer);
-  qaLog('deferred_answer',{late:true,waitMs:Date.now()-d.started,chars:(d.answer||'').length});
-  qaFlushLog({state:'deferred_answer',q:d.q,late:true,waitMs:Date.now()-d.started});
+  await speakDeferredAnswers(d,()=>g===_qaGen&&playing,'late_yes',{late:true});
   if(g!==_qaGen||!playing)return;
   resumeFromInterrupted();
 }
@@ -2225,8 +2271,9 @@ async function handleInterruption(q,fromClosing){
   // 상태 확인이다. 실측([681h] +699s): 상태 문의가 rag-miss → 중간 멘트("먼저 발표를 진행하고…")
   // + 상태 문의 텍스트의 지식 습득까지 가서 이중 오염. 질문으로 처리하지 말고 실제 상태로 답한다.
   if(/(아까|방금|조금\s*전|중간에).{0,24}(물어봤|질문했|물었|여쭤봤).{0,28}(찾았|찾으셨|답변|됐|있나|없나)/.test(q)&&!/찾아\s*(설명|드려|줘|봐)/.test(q)){
+    promoteDeferred();
     const _d=_deferQA;
-    dbg('🧭 지연 답변 상태 문의 — status='+(_d?_d.status:'없음'));
+    dbg('🧭 지연 답변 상태 문의 — status='+(_d?_d.status:'없음')+', 대기열='+_deferPending.length);
     if(_d&&_d.status==='ready'){
       // [2026-10-06] ready인 상태 문의는 사용자가 직접 물은 것 — 섹션 경계를 기다리지 않고 즉시
       // 제안·제공한다(명시적 개입). 기존엔 제안을 풀에만 던져두고 소비자가 없어 동의("네") 후에도
@@ -2239,10 +2286,8 @@ async function handleInterruption(q,fromClosing){
         setStatus('💬 대기 질문 답변 재생');
         await speakUnified('답변 드리겠습니다.');
         if(gen!==_qaGen)return;
-        await speakQaAnswer(dd.answer);
+        await speakDeferredAnswers(dd,()=>gen===_qaGen,'status_q');
         if(gen!==_qaGen)return;
-        qaLog('deferred_answer',{via:'status_q',waitMs:Date.now()-dd.started,chars:(dd.answer||'').length});
-        qaFlushLog({state:'deferred_answer',q:dd.q,waitMs:Date.now()-dd.started});
       }
       // 거절·무응답 — 1차 만료로 되돌아간 'ready'면 유지해 섹션 경계 훅이 다시 제안, 그 외는 폐기
       _deferQA=(dd&&!want&&dd.status==='ready')?dd:null;
@@ -2463,6 +2508,7 @@ async function playSentenceStream(idx){
     // 완료 직후 개입(아래 재생 꼬리 훅)으로 되돌림 — 슬라이드 경계까지는 텀이 너무 길다는 지적.
     // 이 슬라이드 끝 분기는 마지막 문장 재생 직후 훅에서 제안 기회를 벌써 얻지만, deferRecheck가
     // 그 사이(~수백 ms)에 막 ready가 된 경우의 후속 안전망으로 남긴다.
+    promoteDeferred();
     if(_deferQA&&_deferQA.status==='ready'&&!(_deferQA.reofferAt&&Date.now()<_deferQA.reofferAt)&&!interrupted){
       const want=await offerDeferredAnswer();
       if(gen!==_playGen||interrupted||!playing)return;  // 제안 중 새 질문/정지 — 체인 폐기
@@ -2472,10 +2518,8 @@ async function playSentenceStream(idx){
           setStatus('💬 대기 질문 답변 재생');
           await speakUnified('답변 드리겠습니다.');  // "네," 접두 금지(조기 EOS 실측) — 프리캐시 문구
           if(gen!==_playGen||interrupted||!playing)return;
-          await speakQaAnswer(d.answer);
+          await speakDeferredAnswers(d,()=>gen===_playGen&&!interrupted&&playing,'section_boundary');
           if(gen!==_playGen||interrupted||!playing)return;
-          qaLog('deferred_answer',{waitMs:Date.now()-d.started,chars:(d.answer||'').length});
-          qaFlushLog({state:'deferred_answer',q:d.q,waitMs:Date.now()-d.started});
         }
       }
       document.getElementById('qaBox').style.display='none';
@@ -2542,6 +2586,7 @@ async function playSentenceStream(idx){
   // 개입을 섹션 경계(위 슬라이드 끝 분기)로 옮겼던 것을 되돌린다. 제안→동의→답변 재생 후 다음
   // 문장으로 자연히 이어진다. refused 정직 통보(습득 실패 안내)는 답변 개입보다 가벼운 상태
   // 통보라 섹션 경계 유지 — 매 문장 방해하지 않는다.
+  promoteDeferred();
   if(_deferQA&&_deferQA.status==='ready'&&(!_deferQA.reofferAt||Date.now()>=_deferQA.reofferAt)){
     const want=await offerDeferredAnswer();
     if(gen!==_playGen||interrupted||!playing)return;  // 제안 중 새 질문/정지 — 체인 폐기
@@ -2550,10 +2595,8 @@ async function playSentenceStream(idx){
       setStatus('💬 대기 질문 답변 재생');
       await speakUnified('답변 드리겠습니다.');  // "네," 접두 금지(조기 EOS 실측) — 프리캐시 문구
       if(gen!==_playGen||interrupted||!playing)return;
-      await speakQaAnswer(d.answer);
+      await speakDeferredAnswers(d,()=>gen===_playGen&&!interrupted&&playing,'sentence_boundary');
       if(gen!==_playGen||interrupted||!playing)return;
-      qaLog('deferred_answer',{via:'sentence_boundary',waitMs:Date.now()-d.started,chars:(d.answer||'').length});
-      qaFlushLog({state:'deferred_answer',q:d.q,waitMs:Date.now()-d.started});
     }
     document.getElementById('qaBox').style.display='none';
     if(!playing||interrupted)return;
@@ -2874,7 +2917,7 @@ slides.forEach((_,i)=>{_scriptChain=_scriptChain.then(()=>ensureScript(i)).catch
 await presentSlide(Math.max(curSlideIdx,0));
 }  // [2026-10-05] pregenPhrases 호출은 발표 '시작' 지점으로 이동 (아래 발표 종료 후 실행이던 호출은 발표 내내 캐시가 빈 원인이었다)
 function pausePresentation(){playing=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('일시정지');if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}  // [2026-10-04 v9] _audioFin 즉시 해제 — 120s 고아 감시자 방지
-function stopAll(){playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);_deferQA=null;_deferAskedAt=0;_pendingQ=null;_qaGen++;_lastQ='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring')qaState='idle';resolveDeferred(false);setStatus('정지')}  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
+function stopAll(){playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);_deferQA=null;_deferPending=[];_deferAskedAt=0;_pendingQ=null;_qaGen++;_lastQ='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring')qaState='idle';resolveDeferred(false);setStatus('정지')}  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
 // ── 마지막 슬라이드 발표 완료 → Q&A 시간 → URL 열기 ──
 let _closingTimer=null;
 function extractURL(){
