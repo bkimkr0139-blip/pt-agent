@@ -119,6 +119,10 @@ button:hover{background:#4a7cdb}
 a{color:#5b8def;text-decoration:none;font-size:.85rem}
 table{width:100%;border-collapse:collapse;font-size:.8rem}
 th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #2a2e38;white-space:nowrap}
+/* [2026-10-06 사용자 지정] 미답변 질문 리스트 — 줄간격 촘촘 + 긴 질문 줄바꿈·클릭 펼치기 */
+table.tight td{padding:3px 6px;line-height:1.35;vertical-align:top}
+.qCell{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;word-break:break-word;cursor:pointer;min-width:220px;max-width:640px}
+.qCell.open{-webkit-line-clamp:unset}
 .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.72rem}
 .pill.pending{background:#3a3220;color:#e0c068}
 .pill.approved{background:#1f3a28;color:#8fe0a8}
@@ -126,8 +130,16 @@ th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #2a2e38;white-spac
 form.inline{display:inline}
 .wide{width:100%;max-width:none;overflow-x:auto;box-sizing:border-box} /* [2026-10-05] 콘텐츠 길이와 무관하게 모든 탭의 프레임 폭·위치 통일 */
 .actBtn{width:auto;margin:2px 3px 2px 0;padding:4px 9px;font-size:.74rem}
+/* [2026-10-06 사용자 지정] 리스트 페이지네이션 — 폐루프 감시·지식 리스트·미답변 질문 등 긴 목록 공용.
+   .pgz 컨테이너 안의 table tbody 행을 클라이언트에서 잘라 보여주고, .pgzBar에 이동 버튼을 그린다. */
+.pgzBar{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:8px 0 2px;font-size:.76rem;color:#9a9ea8}
+.pgzBar button{width:auto;margin:0;padding:3px 9px;font-size:.74rem;background:#232833;color:#c9cdd6;border:1px solid #2a2e38}
+.pgzBar button:hover{background:#2b3a5c}
+.pgzBar button.cur{background:#2b5fd9;border-color:#2b5fd9;color:#fff;font-weight:700}
+.pgzBar button:disabled{opacity:.4;cursor:default}
+.pgzBar .pgzInfo{margin-left:auto;color:#767b86}
 /* [2026-10-04] 관리자 콘솔 — 사이드바 메뉴 + 탭 콘텐츠 레이아웃 */
-.adm{display:flex;width:100%;max-width:1280px;margin:0 auto;gap:18px;padding:20px 16px;align-items:flex-start;box-sizing:border-box;min-height:100vh} /* min-height 100vh — 탭 높이 차와 무관하게 상단 고정(중앙정렬 무력화) */
+.adm{display:flex;width:100%;max-width:none;margin:0;gap:18px;padding:14px 10px;align-items:flex-start;box-sizing:border-box;min-height:100vh} /* [2026-10-06 사용자 지정] max-width 1280 제거 — 프레임 좌우 제한으로 글자가 잘리지 않게 전체 폭 사용. min-height 100vh — 탭 높이 차와 무관하게 상단 고정 */
 .side{flex:0 0 216px;background:#1a1d24;border:1px solid #2a2e38;border-radius:14px;padding:14px 10px;position:sticky;top:16px}
 .side h1{font-size:1rem;margin:2px 8px 12px}
 .mI{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:9px;color:#c9cdd6;font-size:.86rem;text-decoration:none;margin:2px 0}
@@ -260,6 +272,40 @@ function admTab(t){
 // [2026-10-05] 새로고침·하위페이지 복귀 시 해시(#knowledge 등)로 탭 복원 — 지식 수정 페이지의
 // "취소 — 지식 관리로" 링크(/admin#knowledge)가 이 복원에 의존한다.
 try{const _h=(location.hash||'').replace('#','');if(_h)admTab(_h)}catch(e){}
+// [2026-10-06, 사용자 요청] 리스트 페이지네이션 — .pgz 컨테이너(폐루프 감시 기록·미답변 질문·지식
+// 리스트 등)의 tbody 행을 클라이언트에서 잘라 보여준다. 서버는 전부 내려주고 화면에서만 접는 방식이라
+// 탭 전환·페이지 이동이 즉시이고 서버 상태도 단순하다. 11쪽 초과 시 현재 주변 + 양 끝만 노출.
+function initPagers(){
+  document.querySelectorAll('.pgz').forEach(w=>{
+    if(w.dataset.pgzInit)return;w.dataset.pgzInit='1';
+    const ps=parseInt(w.dataset.ps||'20',10);
+    const rows=[...w.querySelectorAll(':scope > table > tbody > tr')];
+    const bar=w.querySelector('.pgzBar');
+    if(!bar||!rows.length)return;
+    const nPages=Math.ceil(rows.length/ps);
+    if(nPages<=1){bar.style.display='none';return}
+    const info=document.createElement('span');info.className='pgzInfo';
+    const mk=(label,title)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.title=title||'';return b};
+    let cur=0;const pageBtns=[];
+    const prevBtn=mk('‹','이전 페이지'),nextBtn=mk('›','다음 페이지');
+    function show(p){
+      cur=Math.max(0,Math.min(p,nPages-1));
+      rows.forEach((r,i)=>r.style.display=(i>=cur*ps&&i<(cur+1)*ps)?'':'none');
+      pageBtns.forEach((b,i)=>{
+        b.style.display=(nPages<=11||i===0||i===nPages-1||Math.abs(i-cur)<=2)?'':'none';
+        b.classList.toggle('cur',i===cur);
+      });
+      prevBtn.disabled=cur===0;nextBtn.disabled=cur===nPages-1;
+      info.textContent=rows.length+'건 · '+(cur+1)+'/'+nPages+'쪽';
+    }
+    prevBtn.onclick=()=>show(cur-1);nextBtn.onclick=()=>show(cur+1);
+    bar.appendChild(prevBtn);
+    for(let p=0;p<nPages;p++){const b=mk(String(p+1));b.onclick=()=>show(p);pageBtns.push(b);bar.appendChild(b)}
+    bar.appendChild(nextBtn);bar.appendChild(info);
+    show(0);
+  });
+}
+initPagers();
 // 문서 탭 안의 서브탭(전체 시스템 문서 ↔ 모델 교체 평가 문서) — 보기 전환 + 다운로드 버튼 동기화
 function docTab(name){
   const sys=name==='sys';
@@ -440,7 +486,7 @@ function integrityPanel() {
       return '🤖 ' + i.auto_patch.map(p => `${p.key} ${p.from}→${p.to}`).join(', ') + ' 적용';
     return i.grade === 'code' ? '📋 코드 패치 대기열 적립' : '추적 중 (조건 미달/쿨다운)';
   };
-  const rows = issues.slice(0, 12).map(i => `<tr>
+  const rows = issues.slice(0, 300).map(i => `<tr>
 <td style="white-space:nowrap">${fmtT(i.ts)}</td>
 <td style="font-weight:700;white-space:nowrap">${esc(i.code)}</td>
 <td>${gradeTag(i)}</td>
@@ -463,8 +509,11 @@ function integrityPanel() {
 <td>${codeQueue}건</td>
 <td>${ap.length ? ap.map(p => `${p.key} ${p.from}→${p.to}`).join(', ') : '없음'}</td>
 </tr></tbody></table>
-<h2 style="font-size:.95rem;margin:14px 0 6px">최근 감지 · 조치 (최신순)</h2>
+<h2 style="font-size:.95rem;margin:14px 0 6px">감지 · 조치 기록 (최신순, 페이지네이션)</h2>
+<div class="pgz" data-ps="20">
 <table><thead><tr><th>시각</th><th>코드</th><th>분류</th><th>건수</th><th>내용</th><th>조치</th></tr></thead><tbody>${rows}</tbody></table>
+<div class="pgzBar"></div>
+</div>
 <p style="margin-top:12px">
 <form class="inline" method="post" action="${PREFIX}/admin/integrity-scan" style="display:inline"><button class="actBtn" type="submit" style="background:#2b5fd9">🛰️ 지금 스캔 실행</button></form>
 <a href="${PREFIX}/admin?tab=loop"><button class="actBtn" type="button">↻ 새로고침</button></a>
@@ -578,7 +627,7 @@ function knowledgeMissItems(userId) {
   const seen = new Set(), items = [];
   try {
     const lines = fs.readFileSync(path.join(__dirname, 'eval', 'rag-miss.jsonl'), 'utf8').split('\n');
-    for (let i = lines.length - 1; i >= 0 && items.length < 50; i--) {
+    for (let i = lines.length - 1; i >= 0 && items.length < 300; i--) {  // [2026-10-06] 50→300 — 페이지네이션 도입으로 전체 네비게이션 가능
       if (!lines[i].trim()) continue;
       let j; try { j = JSON.parse(lines[i]); } catch { continue; }
       const nq = normQ(j.q || '');
@@ -595,10 +644,20 @@ function confBadge(c) {
   const lv = c >= 0.8 ? ['높음', '#2f8a4c'] : c >= 0.45 ? ['보통', '#8a6a20'] : ['낮음', '#8a3030'];
   return `<span class="pill" style="background:${lv[1]}">${lv[0]} ${Number(c).toFixed(1)}</span>`;
 }
+// [2026-10-06, 사용자 요청] RAG top을 직관 표현으로 — 원시값은 코사인 유사도(0~1, 높을수록 관련)라
+// 운영자가 판단하기 어렵다. 실측 분포(정답 질문 ≈0.45, 무관 ≈0.28, 경계 ≈0.37)를 기준으로 3단
+// 라벨 + 퍼센트를 보여주고 원시값은 툴팁으로 남긴다. "낮음"은 그 질문과 관련된 기존 지식이
+// 없었다는 뜻 — 습득 대기 목록에서 무엇을 먼저 습득할지 고를 때 기준이 된다.
+function ragTopCell(v) {
+  if (v == null) return '<small style="color:#767b86">측정 안 됨</small>';
+  const n = Number(v), pct = Math.round(n * 100);
+  const lv = n >= 0.45 ? ['관련도 높음', '#2f8a4c'] : n >= 0.35 ? ['경계 — 검토 권장', '#8a6a20'] : ['관련도 낮음', '#8a3030'];
+  return `<small><span class="pill" style="background:${lv[1]}">${lv[0]}</span> ${pct}%<br><span style="color:#767b86" title="RAG 최고 유사도 ${n.toFixed(3)} (코사인 0~1, 높을수록 관련. 실측: 정답 ≈0.45 · 무관 ≈0.28)">유사도 ${n.toFixed(3)}</span></small>`;
+}
 function knowledgePanel(kuid) {
   if (!kuid) return '<div class="box wide"><h1>🧠 지식 관리</h1><p style="color:#888">관리자 계정을 찾을 수 없습니다.</p></div>';
   let docs = [];
-  try { docs = db.prepare('SELECT id,name,is_primary,origin,confidence,source_bytes,created_at FROM documents WHERE user_id=? ORDER BY created_at DESC LIMIT 100').all(kuid); } catch { /* 컬럼 신설 전 */ }
+  try { docs = db.prepare('SELECT id,name,is_primary,origin,confidence,source_bytes,created_at FROM documents WHERE user_id=? ORDER BY created_at DESC LIMIT 500').all(kuid); } catch { /* 컬럼 신설 전 */ }  // [2026-10-06] 100→500 — 페이지네이션 도입
   const autoN = docs.filter(d => (d.origin || 'manual') === 'auto').length;
   const miss = knowledgeMissItems(kuid);
   const pendN = miss.filter(x => x.state === 'pending').length;
@@ -631,8 +690,8 @@ function knowledgePanel(kuid) {
       ? `<form class="inline" method="post" action="${PREFIX}/admin/knowledge/acquire"><input type="hidden" name="q" value="${esc(m.q)}"><button class="actBtn" type="submit">🧠 지금 습득</button></form>
 <form class="inline" method="post" action="${PREFIX}/admin/knowledge/dismiss" onsubmit="return confirm('이 질문을 제외할까요? 다시 습득 제안되지 않습니다.')"><input type="hidden" name="q" value="${esc(m.q)}"><button class="actBtn" type="submit" style="background:#3a3a44">제외</button></form>`
       : (m.state === 'acquired' ? '<small style="color:#767b86">로컬 지식으로 답변 가능</small>' : '<small style="color:#767b86">재습득 안 함</small>');
-    return `<tr><td>${esc(m.q)}</td><td><small>${esc((m.ts || '').slice(5, 16).replace('T', ' '))}</small></td>
-<td><small>${m.reason === 'answer_tts_timeout' ? '음성 초과' : '자료 미스'}</small></td><td><small>${m.ragTop == null ? '-' : Number(m.ragTop).toFixed(3)}</small></td>
+    return `<tr><td><div class="qCell" onclick="this.classList.toggle('open')" title="클릭해서 펼치기/접기">${esc(m.q)}</div></td><td><small>${esc((m.ts || '').slice(5, 16).replace('T', ' '))}</small></td>
+<td><small>${m.reason === 'answer_tts_timeout' ? '음성 초과' : '자료 미스'}</small></td><td>${ragTopCell(m.ragTop)}</td>
 <td>${stBadge(m.state)}</td><td>${acts}</td></tr>`;
   }).join('') || '<tr><td colspan="6" style="color:#888">미답변 질문 없음 — 모든 질문에 답하고 있습니다 🎉</td></tr>';
   return `<div class="box wide">
@@ -643,7 +702,12 @@ function knowledgePanel(kuid) {
 <a class="card" href="#knowledge" onclick="return false"><div class="k">❓ 미답변 질문 대기</div><div class="v">${pendN}<small style="font-size:.85rem;color:#9a9ea8">건</small></div><div class="s">습득 대기 ${pendN} · 습득됨 ${miss.filter(x => x.state === 'acquired').length} · 제외 ${miss.filter(x => x.state === 'dismissed').length}</div></a>
 </div>
 <h2 class="sec">미답변 질문 (최근순)</h2>
-<table><thead><tr><th>질문</th><th>감지</th><th>사유</th><th>RAG top</th><th>상태</th><th></th></tr></thead><tbody>${missRows}</tbody></table>
+<p style="color:#767b86;font-size:.75rem;margin:2px 0 6px"><b>관련도</b> = 질문을 받았을 때 기존 지식에서 찾은 최고 유사도. <b>낮음</b>이면 관련 자료가 아예 없었다는 뜻(습득 가치 높음), <b>경계</b>는 비슷한 지식이 있었지만 답이 안 나온 경우(내용 검토 후 습득).</p>
+<div class="pgz" data-ps="20">
+<table class="tight"><thead><tr><th>질문</th><th>기록일시</th><th>사유</th><th>관련도</th><th>상태</th><th></th></tr></thead><tbody>${missRows}</tbody></table>
+<div class="pgzBar"></div>
+</div>
+<p style="color:#767b86;font-size:.72rem;margin:2px 0 0">긴 질문은 두 줄까지 보이고, <b>클릭하면 전체가 펼쳐집니다</b>.</p>
 <h2 class="sec">수동 지식 추가</h2>
 <form method="post" action="${PREFIX}/admin/knowledge/add" style="margin:8px 0 4px">
 <input name="name" placeholder="지식 이름(예: RBAC 개념)" required style="width:280px;padding:6px 8px;font-size:.8rem;background:#0d0f13;border:1px solid #2a2e38;border-radius:6px;color:#e8e8ea">
@@ -651,14 +715,18 @@ function knowledgePanel(kuid) {
 <textarea name="text" placeholder="지식 내용을 입력하세요. 발표 질의응답에 답하는 형태의 완결된 문장으로 쓰는 것이 임베딩 검색에 유리합니다." required rows="4" style="display:block;width:100%;box-sizing:border-box;margin-top:6px;padding:8px;font-size:.8rem;background:#0d0f13;border:1px solid #2a2e38;border-radius:6px;color:#e8e8ea"></textarea>
 <button class="actBtn" type="submit" style="margin-top:6px">＋ 추가·임베딩</button>
 </form>
-<h2 class="sec">지식 리스트 (최근 100건)</h2>
+<h2 class="sec">지식 리스트 (전체 — 페이지네이션)</h2>
 <form id="knowBulkForm" method="post" action="${PREFIX}/admin/knowledge/delete-many" onsubmit="return knowBulkConfirm()" style="margin:6px 0">
 <button class="actBtn" type="submit" style="background:#8a3030">🗑 선택 삭제</button>
 <small style="color:#767b86;margin-left:8px">체크한 문서를 일괄 삭제합니다. 자동 습득(🧠) 건은 해당 질문이 재습득 대상에서 제외됩니다.</small>
 </form>
-<table><thead><tr><th style="width:30px"><input type="checkbox" id="knowSelAll" onclick="knowSelAllChk(this)" title="전체 선택" style="vertical-align:middle"></th><th>문서</th><th>출처</th><th>신뢰도</th><th>조정</th><th>등록</th><th></th></tr></thead><tbody>${docRows}</tbody></table>
+<div class="pgz" data-ps="20">
+<table><thead><tr><th style="width:30px"><input type="checkbox" id="knowSelAll" onclick="knowSelAllChk(this)" title="현재 페이지 전체 선택" style="vertical-align:middle"></th><th>문서</th><th>출처</th><th>신뢰도</th><th>조정</th><th>등록</th><th></th></tr></thead><tbody>${docRows}</tbody></table>
+<div class="pgzBar"></div>
+</div>
 <script>
-function knowSelAllChk(cb){document.querySelectorAll('input.knowChk').forEach(c=>c.checked=cb.checked)}
+// [2026-10-06] 전체 선택은 현재 페이지(보이는 행)에만 적용 — 숨은 페이지의 문서가 몰래 삭제 대상이 되는 것 방지
+function knowSelAllChk(cb){document.querySelectorAll('input.knowChk').forEach(c=>{const tr=c.closest('tr');if(!tr||tr.style.display!=='none')c.checked=cb.checked})}
 function knowBulkConfirm(){const c=document.querySelectorAll('input.knowChk:checked');if(!c.length){alert('삭제할 문서를 먼저 체크하세요.');return false}const a=[...c].filter(x=>x.dataset.auto==='1').length;return confirm('선택한 '+c.length+'개 문서를 삭제할까요?'+(a?' (자동 습득 '+a+'건 포함 — 해당 질문은 재습득 대상에서 제외됩니다.)':''))}
 </script>
 </div>`;
@@ -1126,9 +1194,71 @@ app.get(`${PREFIX}/api/docs/:id/chunks`, requireApiAuth, (req, res) => {
 });
 // "주로 참고" 문서가 하나라도 지정돼 있으면 그 문서들로만 검색 범위를 좁힘(기존 클라이언트 searchRef와
 // 동일한 규칙) — 전부 req.user.id로 스코프돼 있어 다른 유저의 청크는 애초에 쿼리에 안 걸림.
+// ── [2026-10-06, 사용자 요청] 발음 오타 유연 검색 ─────────────────────────────
+// ASR이 "위즈베이스"를 "위저베이스/미즈베이스"로 받아쓰면 질의 임베딩이 흔들려 첨부문서
+// 청크가 탈락한다(실측: 교정 없으면 진짜 청크 0.40이 컷 탈락). 두 층으로 교정 후보를 찾고
+// suspect로 반환해 클라이언트가 1회 발음 확인("위즈베이스 맞나요?") 후 정확한 키워드로 답한다.
+//  1) 발음 교정 사전(data/pron-dict.json — 운영자가 자유롭게 추가) 부분문자열 치환
+//  2) 어휘집 퍼지 — 청크 본문에서 모은 한글 토큰 중 1음절 차이 유사어가 유일할 때만 치환
+const PRON_DICT_FILE = path.join(__dirname, 'data', 'pron-dict.json');
+function loadPronDict() {
+  try { const j = JSON.parse(fs.readFileSync(PRON_DICT_FILE, 'utf8')); return (j && typeof j === 'object') ? j : {}; } catch { return {}; }
+}
+const _lexCache = new Map(); // userId → {at, lex: Map(토큰,빈도)}
+function entityLexicon(userId) {
+  const c = _lexCache.get(userId);
+  if (c && Date.now() - c.at < 60000) return c.lex;
+  const lex = new Map();
+  try {
+    for (const r of db.prepare('SELECT text FROM chunks WHERE user_id=?').all(userId)) {
+      for (const m of String(r.text).matchAll(/[가-힣]{3,}/g)) lex.set(m[0], (lex.get(m[0]) || 0) + 1);
+    }
+  } catch { /* 청크 없음 */ }
+  _lexCache.set(userId, { at: Date.now(), lex });
+  return lex;
+}
+// 같은 길이에서 딱 1음절만 다른지(치환 1개). 끝음절만 다르면 조사 변이로 보고 교정하지 않는다.
+function oneSyllableSubst(a, b) {
+  if (a.length !== b.length || a.length < 3) return false;
+  let diff = -1;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) { if (diff >= 0) return false; diff = i; }
+  return diff >= 0 && diff < a.length - 1;
+}
+function correctQuery(query, userId) {
+  let q = String(query);
+  let suspect = null;
+  // 1) 사전 — 부분문자열 치환(조사가 붙어도 적용). 첫 교정만 suspect로 보고.
+  for (const [from, to] of Object.entries(loadPronDict())) {
+    if (from.length >= 3 && from !== to && q.includes(from)) {
+      q = q.split(from).join(to);
+      if (!suspect) suspect = { from, to, rule: 'dict' };
+    }
+  }
+  // 2) 어휘집 퍼지 — 쿼리 한글 토큰이 어휘집에 없고 유일한 1음절 유사어가 있으면 치환
+  const lex = entityLexicon(userId);
+  if (lex.size) {
+    for (const t of new Set(q.match(/[가-힣]{3,}/g) || [])) {
+      if (lex.has(t)) continue;
+      let best = null;
+      for (const cand of lex.keys()) {
+        if (cand.length !== t.length || !oneSyllableSubst(t, cand)) continue;
+        if (best) { best = null; break; } // 유사어 2개 이상 = 판단 불가, 교정 안 함
+        best = cand;
+      }
+      if (best) { q = q.split(t).join(best); if (!suspect) suspect = { from: t, to: best, rule: 'fuzzy' }; }
+    }
+  }
+  return { q, suspect };
+}
+// 문자 2-gram 집합 — 임베딩 점수에 더하는 어휘 신호(질문 키워드가 청크 본문에 그대로 있으면 가점)
+function bigramSet(s) {
+  const t = String(s).replace(/\s+/g, ''), set = new Set();
+  for (let i = 0; i < t.length - 1; i++) set.add(t.slice(i, i + 2));
+  return set;
+}
 app.post(`${PREFIX}/api/search`, requireApiAuth, async (req, res) => {
-  const { query, k } = req.body;
-  if (!query) return res.json([]);
+  const { query, k, noCorrect } = req.body;
+  if (!query) return res.json({ refs: [], suspect: null });
   // [2026-10-05] 자동 습득 지식(origin='auto')은 '주로 참고' 스코프와 무관하게 항상 검색 대상 —
   // QA 거절로 습득된 지식은 원래 덱에 없던 내용이라 is_primary로 좁히면 영영 검색되지 않는다.
   const primaryIds = db.prepare('SELECT id FROM documents WHERE user_id=? AND is_primary=1').all(req.user.id).map(d => d.id);
@@ -1137,14 +1267,24 @@ app.post(`${PREFIX}/api/search`, requireApiAuth, async (req, res) => {
   const rows = scopeIds
     ? db.prepare(`SELECT c.text,c.embedding,c.document_id,d.name as doc_name,d.origin as origin,d.confidence as confidence FROM chunks c JOIN documents d ON d.id=c.document_id WHERE c.user_id=? AND c.document_id IN (${scopeIds.map(() => '?').join(',')})`).all(req.user.id, ...scopeIds)
     : db.prepare(`SELECT c.text,c.embedding,c.document_id,d.name as doc_name,d.origin as origin,d.confidence as confidence FROM chunks c JOIN documents d ON d.id=c.document_id WHERE c.user_id=?`).all(req.user.id);
-  if (!rows.length) return res.json([]);
-  const qEmb = await embedViaN8n(query);
-  if (!qEmb) return res.json([]);
+  if (!rows.length) return res.json({ refs: [], suspect: null });
+  // [2026-10-06] 발음 교정 — noCorrect=1이면 클라이언트가 "아니요"로 확정해 원문으로 재검색하는 경로.
+  const corr = noCorrect ? { q: String(query), suspect: null } : correctQuery(query, req.user.id);
+  const qEmb = await embedViaN8n(corr.q);
+  if (!qEmb) return res.json({ refs: [], suspect: corr.suspect });
   // [2026-10-05 v9d] 신뢰도 랭킹 반영 — 자동 습득 문서의 conf(0.5/0.3)가 랭킹에 전혀 반영되지 않아
   // 불확실(conf 0.3) 청크가 1차 문서와 동등 경쟁했다(실측 오염: 불만 원문·STT 잡음이 임베딩돼 RAG에 유입).
   // 점수에 신뢰도 가중(1.0→×1.0, 0.5→×0.8, 0.3→×0.72)을 두고 컷 판정도 같은 가중 점수로 일관 적용.
-  const ranked = rows.map(r => ({ text: r.text, docId: r.document_id, docName: r.doc_name, score: cosineSim(qEmb, bufToEmb(r.embedding)) * (0.6 + 0.4 * (r.confidence == null ? 1 : r.confidence)), origin: r.origin || 'manual', confidence: r.confidence == null ? 1 : r.confidence }))
-    .sort((a, b) => b.score - a.score);
+  // [2026-10-06] 어휘 가점 — 질문 2-gram이 청크 본문에 실제로 등장하면 최대 +25%(임베딩이
+  // 경계 점수인 "수행 실적"류 질문이 본문 어휘와 맞물려 정렬 안정화).
+  const qBg = bigramSet(corr.q);
+  const ranked = rows.map(r => {
+    let score = cosineSim(qEmb, bufToEmb(r.embedding)) * (0.6 + 0.4 * (r.confidence == null ? 1 : r.confidence));
+    const bg = bigramSet(r.text);
+    let hit = 0; for (const b of qBg) if (bg.has(b)) hit++;
+    score *= 1 + 0.25 * Math.min(1, hit / Math.max(1, qBg.size));
+    return { text: r.text, docId: r.document_id, docName: r.doc_name, score, origin: r.origin || 'manual', confidence: r.confidence == null ? 1 : r.confidence };
+  }).sort((a, b) => b.score - a.score);
   // [2026-10-05] 커버리지 개선 — 이 임베딩 모델은 동일 도메인 한국어 텍스트에서 청크 간 배경 유사도
   // 자체가 높다(실측: 무작위 쌍 중앙값 0.462, p90 0.641). 절대 컷 0.3은 관련 문서(top1 0.34)까지
   // 간당간당 걸러내 5문항 중 1건만 매칭됐다. 상대 컷(top×0.85, 배경 수준과 무관하게 최상위 근처만
@@ -1153,7 +1293,7 @@ app.post(`${PREFIX}/api/search`, requireApiAuth, async (req, res) => {
   const cut = Math.max(0.25, top * 0.85);
   const scored = ranked.slice(0, k || 3).filter(r => r.score >= cut);
   logUsage(req.user.id, 'search_call', null);
-  res.json(scored);
+  res.json({ refs: scored, suspect: corr.suspect });
 });
 
 // ── 지식 자동 습득 폐루프 [2026-10-05, 사용자 요청] ──────────────────────────
@@ -1192,10 +1332,69 @@ function knowLedger(rec) { try { fs.appendFileSync(KNOW_LEDGER, JSON.stringify(r
 
 // 실제 습득 — 클라우드 답변 1회 + 임베딩 1회(청크는 질문+답변 합본 1~2개). 수동(콘솔) 호출도
 // 같은 함수를 쓰고 ledger source로만 구분한다. 실패해도 발표 흐름을 건드리지 않는다(호출부 비동기).
+// ── [2026-10-06, 사용자 요청] 휘발성 질문 — "오늘 날씨 어때요"처럼 답이 오늘/지금 만 유효한 질문.
+// 실측([rwz8]): 이런 질문이 rag-miss → 클라우드 만능답변("기상청을 참고하세요")이 conf 0.3 지식으로
+// 오염(doc#33) → 지연 제안 절차까지 돌았는데 정작 답변은 못 받음. 원칙: 휘발성 질문은 RAG·지식
+// 습득 대상이 아니며 /api/volatile 즉시답변 경로가 담당한다. 이 RE는 클라이언트 게이트, /api/volatile,
+// 습득 금지 게이트 3곳이 공유한다.
+const VOLATILE_Q_RE = /(날씨|기온|온도|미세먼지|초미세|황사|강수)|몇\s*시(예|야|입니|습니)|지금\s*(시간|몇\s*시)|오늘\s*(날짜|며칠|몇\s*일|몇\s*시)|무슨\s*(요일|날)|며칠(예|야|입니|습니)|오늘이\s*몇|지금이\s*몇|오늘\s*(환율|주가|코스피|코스닥|비트코인|이더리움|시세|금리|뉴스)|(비트코인|이더리움|코스피|코스닥|환율|달러)[^가힣]{0,6}(시세|얼마|가격|어때|어떻|몇)/;
+// 주의: "최신 버전은?"·"실시간 처리 방식은?" 같은 지식 질문과 겹치므로 최신·실시간 단독 어휘는 게이트에 넣지 않는다.
+// 시세류는 "시세차익거래" 같은 지식 어휘 오검출을 막으려고 코인·지수 접두와 (시세|얼마|가격…) 접미가 붙은 형태만 받는다.
+const WMO_WEATHER = { 0: '맑음', 1: '대체로 맑음', 2: '부분적으로 흐림', 3: '흐림', 45: '안개', 48: '착빙 안개', 51: '약한 이슬비', 53: '이슬비', 55: '강한 이슬비', 56: '얼어붙는 이슬비', 57: '얼어붙는 강한 이슬비', 61: '약한 비', 63: '비', 65: '강한 비', 66: '얼어붙는 비', 67: '얼어붙는 강한 비', 71: '약한 눈', 73: '눈', 75: '강한 눈', 77: '진눈깨비', 80: '소나기', 81: '소나기', 82: '강한 소나기', 85: '약한 눈 소나기', 86: '눈 소나기', 95: '천둥번개', 96: '우박을 동반한 천둥번개', 99: '강한 우박을 동반한 천둥번개' };
+const VOLATILE_CITIES = [['서울', 37.5665, 126.978], ['성남', 37.4449, 127.1389], ['수원', 37.2636, 127.0286], ['인천', 37.4563, 126.7052], ['부산', 35.1796, 129.0756], ['대구', 35.8714, 128.6014], ['대전', 36.3504, 127.3845], ['광주', 35.1595, 126.8526], ['울산', 35.5384, 129.3114]];
+// 휘발성 질문 즉시답변 — 날씨는 Open-Meteo 실황(무료·키 불필요), 시각·날짜·요일은 서버 시각(KST)으로
+// 직접 구성해 LLM 왕복 없이 1초 내 사실 응답. 시세·뉴스류는 연결된 실황원이 없으므로 현재 시각과 함께
+// 정직하게 모른다고 답한다(만능답변 지식 오염 재발 방지).
+async function volatileAnswer(q) {
+  const now = new Date();
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  const h = now.getHours(), m = String(now.getMinutes()).padStart(2, '0');
+  const dt = `오늘은 ${now.getFullYear()}년 ${now.getMonth() + 1}월 ${now.getDate()}일 ${days[now.getDay()]}요일, 지금 시각은 ${h >= 12 ? '오후' : '오전'} ${h % 12 || 12}시 ${m}분입니다.`;
+  // 시각·날짜·요일 질문 — LLM 왕복 없이 즉답
+  if (!/(날씨|기온|온도|미세먼지|초미세|황사|강수|환율|주가|코스피|코스닥|비트코인|이더리움|시세|금리|뉴스)/.test(q)) return dt;
+  // 미세먼지·황사는 Open-Meteo 실황에 없다 — 날씨로 둘러대지 말고 정직히 모른다고 답한다.
+  if (/미세먼지|초미세|황사/.test(q)) return `${dt} 죄송합니다, 미세먼지·황사 실시간 정보는 아직 연결된 정보원이 없어 정확히 알려드리기 어렵습니다.`;
+  if (!/날씨|기온|온도|미세먼지|초미세|황사|강수/.test(q)) {
+    return `${dt} 실시간 ${/환율/.test(q) ? '환율은' : /비트코인|이더리움/.test(q) ? '암호화폐 시세는' : /코스피|코스닥|주가|시세/.test(q) ? '증시 시세는' : /금리/.test(q) ? '금리는' : '뉴스는'} 아직 연결된 정보원이 없어 정확히 알려드리기 어렵습니다. 발표 자료 관점에서 도움이 필요하시면 말씀해 주세요.`;
+  }
+  // 날씨 — Open-Meteo 실황(current). "내일/모레 날씨"는 일별 예보(daily)로 답한다 — 실황으로
+  // 둘러대면 틀린 정보가 되므로. 도시명 없으면 기본 서울.
+  const city = VOLATILE_CITIES.find(c => q.includes(c[0])) || VOLATILE_CITIES[0];
+  const tomorrow = /내일/.test(q), dayAfter = /모레|글피/.test(q);
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${city[1]}&longitude=${city[2]}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&forecast_days=3&timezone=Asia%2FSeoul`;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const c = j && j.current;
+    if (!c || c.temperature_2m == null) throw new Error('빈 실황');
+    if (tomorrow || dayAfter) {
+      const d = j.daily, idx = dayAfter ? 2 : 1;
+      if (!d || !d.weather_code || d.weather_code[idx] == null) throw new Error('빈 예보');
+      const when = dayAfter ? '모레' : '내일';
+      return `${city[0]} ${when} 날씨는 ${WMO_WEATHER[d.weather_code[idx]] || '알 수 없는 날씨'}이고, 기온은 ${Math.round(d.temperature_2m_min[idx])}도에서 ${Math.round(d.temperature_2m_max[idx])}도로 예보됩니다.`;
+    }
+    const sky = WMO_WEATHER[c.weather_code] || '알 수 없는 날씨';
+    return `${dt} ${city[0]} 현재 날씨는 ${sky}이고, 기온은 ${Math.round(c.temperature_2m)}도입니다.` +
+      (c.apparent_temperature != null && Math.abs(c.apparent_temperature - c.temperature_2m) >= 2 ? ` 체감은 ${Math.round(c.apparent_temperature)}도입니다.` : '') +
+      (c.wind_speed_10m != null ? ` 풍속은 시속 ${Math.round(c.wind_speed_10m)}킬로미터입니다.` : '');
+  } catch (e) {
+    console.log(`[휘발성 답변] 날씨 실황 조회 실패(${city[0]}) — ${(e && e.message) || e}`);
+    return `${dt} 죄송합니다, 실시간 기상 정보를 지금 가져오지 못했습니다.`;
+  }
+}
+
 async function acquireKnowledge(userId, q, opts = {}) {
   const nq = normQ(q);
   if (!nq) return { ok: false, reason: 'empty' };
   const name = knowName(q);
+  // [2026-10-06, 사용자 요청] 휘발성 질문 습득 금지 — 오늘 날씨·시각류는 오늘만 유효해 지식화 가치가
+  // 없다(실측 doc#33: "기상청 참고" 만능답변이 지식으로 저장). 클라이언트 즉답 경로가 담당하며, 여기선
+  // 낡은 탭 등 구버전 클라이언트의 습득 요청도 2차 차단한다. 백로그(rag-miss)에도 남지 않게 reason='volatile'.
+  if (VOLATILE_Q_RE.test(nq)) {
+    console.log(`[지식 습득 보류] "${name}" — 휘발성 질문(오늘·지금만 유효) — 지식화하지 않음`);
+    return { ok: false, reason: 'volatile' };
+  }
   if (_knowInFlight.has(userId + ':' + name)) return { ok: false, reason: 'in-flight' };
   _knowInFlight.add(userId + ':' + name);
   const t0 = Date.now();
@@ -1217,8 +1416,17 @@ async function acquireKnowledge(userId, q, opts = {}) {
     if (!ans) { console.log(`[지식 습득 실패] "${name}" — 클라우드 빈 응답(${Date.now() - t0}ms) — n8n 게이트웨이 확인 필요`); return { ok: false, reason: 'cloud-empty' }; }
     const uncertain = /^\[불확실\]/.test(ans) || ans.includes('[불확실]');
     ans = ans.replace(/\[불확실\]\s*/g, '').trim();
-    // 2) 임베딩 — 청크 본문에 질문을 함께 넣는다(질문형 쿼리와의 코사인 적중률↑).
-    const full = `${q}\n${ans}`;
+    // [2026-10-06 실측 doc#29] 비답변 게이트 — 클라우드가 "공개된 자료가 제한적"류로 답하면 지식화하지 않는다.
+    // 실측 오염: 비답변이 conf 0.3으로 저장되고, 재질문 시 질문 에코가 유사도 0.70로 최상위 독점 →
+    // 상대 컷(top×0.85)이 0.43으로 인상돼 진짜 첨부문서 청크(0.40)가 탈락 → "관련 정보 없음" 거절 루프.
+    // 백로그엔 rag-miss로 남으니 콘솔에서 수동 습득·자료 첨부로 처리한다.
+    if (/(정보(가|는)?\s*제한|제한적|공개된\s*자료가?\s*없|확인할\s*수\s*없|찾을\s*수\s*없|알\s*수\s*없|정보가?\s*없|(답변|대답|제공)드?릴?\s*수\s*없|특정할\s*수\s*없|알려져\s*있지\s*않)/.test(ans)) {
+      console.log(`[지식 습득 보류] "${name}" — 클라우드 비답변(정보 없음류) — 지식화하지 않고 백로그에만 유지 (${Date.now() - t0}ms)`);
+      return { ok: false, reason: 'no-answer' };
+    }
+    // 2) 임베딩 — 청크 본문은 답변만 넣는다. 질문 원문까지 임베딩하면 같은 질문이 재등장했을 때
+    // 질문 에코가 쿼리 자신과 최고 유사도(위 실측 0.70)로 검색을 독점한다. 질문은 문서명('자동학습: …')으로만 남긴다.
+    const full = ans;
     const docId = db.prepare('INSERT INTO documents(user_id,name,is_primary,source_bytes,created_at,origin,confidence) VALUES(?,?,0,?,?,?,?)')
       .run(userId, name, Buffer.byteLength(full, 'utf8'), new Date().toISOString(), 'auto', uncertain ? CONF_AUTO_UNCERTAIN : CONF_AUTO).lastInsertRowid;
     const ins = db.prepare('INSERT INTO chunks(document_id,user_id,seq,text,embedding,char_count) VALUES(?,?,?,?,?,?)');
@@ -1239,6 +1447,16 @@ async function acquireKnowledge(userId, q, opts = {}) {
     _knowInFlight.delete(userId + ':' + name);
   }
 }
+// [2026-10-06, 사용자 요청] 휘발성 질문 즉시답변 — 날씨(Open-Meteo 실황)·시각/날짜(서버 KST)를
+// 클라우드 LLM 왕복 없이 직접 구성해 돌려준다. 절대 습득·임베딩하지 않는다 — 오늘만 유효한 정보를
+// 지식화하면 검색을 오염시킨다(실측 doc#33: "기상청 참고" 만능답변이 conf 0.3으로 저장).
+app.post(`${PREFIX}/api/volatile`, requireApiAuth, async (req, res) => {
+  const q = String((req.body && req.body.q) || '').trim();
+  if (!q || !VOLATILE_Q_RE.test(normQ(q))) return res.status(400).json({ error: 'volatile 아님' });
+  try { res.json({ answer: await volatileAnswer(q) }); }
+  catch (e) { res.json({ answer: '죄송합니다, 실시간 정보를 지금 확인할 수 없습니다.' }); }
+});
+
 // 발표 중 클라이언트 rag-miss 거절 → 즉시 202 응답 후 백그라운드 습득(답변 흐름 무영향).
 app.post(`${PREFIX}/api/knowledge/acquire`, requireApiAuth, (req, res) => {
   const q = String((req.body && req.body.q) || '').trim();

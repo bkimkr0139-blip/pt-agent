@@ -419,27 +419,9 @@ const STYLE='Warm and friendly Korean presenter speaking with a gentle smile. Br
 let slides=[],curSlideIdx=-1,sentences=[],curSentenceIdx=0;
 let sentenceGaps=[];  // [2026-10-04 v7] 문장(조각) i 재생 후 휴지 ms — 쉼표 조각 200ms / 문장 끝 700ms
 let playing=false,interrupted=false,audioEl=null,recognizer=null,sttActive=false,ttsSpeaking=false,panelOpen=false;let qaState='idle';
-// [2026-09-29] 브라우저 내장 TTS(speakFB) 폴백이 voice 미지정으로 매번 OS 기본 음성에 맡겨져서,
-// 음성팩 로딩 타이밍/업데이트에 따라 "갑자기 다른(이상한) 목소리"로 튀는 문제 재발 방지 —
-// 최초 1회 한국어 음성을 찾아 고정하고, 이후 폴백은 항상 같은 음성을 씀.
-let _koVoice=null;
-function pickKoreanVoice(){
-  if(typeof speechSynthesis==='undefined')return null;
-  const voices=speechSynthesis.getVoices();
-  if(!voices.length)return null;
-  // [2026-10-05] lang='ko-KR' 표기만으로는 부족 — 음성팩이 실제로는 중/일어 목소리로 한국어를
-  // 읽어 "외국인 억양"이 되는 실측 사례. 이름에 한국어 표기가 확실한 것을 우선하고, 없으면
-  // ko 계열, 그래도 없으면 null(호출부가 나중에 다시 시도).
-  const v=voices.find(v=>/^ko/i.test(v.lang||'')&&/한국|korean|heami|허미|yuna|유나|sora|siri/i.test(v.name||''))
-        ||voices.find(v=>/^ko/i.test(v.lang||''))||null;
-  if(v)console.log('브라우저 TTS 폴백 음성 고정:',v.name,v.lang);
-  else console.warn('한국어 음성을 찾지 못함 — 음성 목록 로딩 후 재시도');
-  return v;
-}
-if(typeof speechSynthesis!=='undefined'){
-  _koVoice=pickKoreanVoice();
-  speechSynthesis.onvoiceschanged=()=>{_koVoice=pickKoreanVoice()};
-}
+// [2026-10-06] 브라우저 내장 TTS 폴백(speakFB·speak·_koVoice) 완전 제거 — 사용자 지정(2026-10-05
+// "브라우저 음성 금지")에 따라 유일한 발화 경로는 로컬/클라우드 TTS다. 잔존 호출부가 없는 사코드였고,
+// 낡은 탭(구버전 코드)에서만 도달해 "선택 페르소나와 다른 목소리"의 한 원인이었다.
 // ── 청중 대화 지속 감지 — 배경 소음이 아닌 실제 대화가 이어지면 잠시 멈추고 확인 ──
 let _bgTalkTimes=[];
 const BG_TALK_WINDOW_MS=10000,BG_TALK_THRESHOLD=3;  // 10초 내 3회 감지되면 대화 지속으로 판단
@@ -449,6 +431,17 @@ const RESUME_RE=/계속\s*(발표|진행|해|하세요|해주세요)|발표\s*(�
 // [2026-09-29] "계속 발표할까요?"에 대한 가장 흔한 대답("네"/"넵"/"알겠습니다"/"좋아요")은 RESUME_RE의
 // 동사형 구문과 안 맞아 무시되던 문제 — Q&A 확인(confirming 상태)에 이미 쓰던 긍정 판별을 공유.
 const POSITIVE_RE=/네|예|넵|넹|좋아|맞아|응|계속|진행|없|괜찮|고마워|감사|충분|알겠|오케이|됐|ok/i; // [2026-10-05] 됐(습니다/어요) 추가 — "답이 됐어요"가 재개 응답으로 안 먹던 것 수정
+// [2026-10-06, 사용자 요청] 휘발성 질문 — "오늘 날씨 어때요"처럼 답이 오늘/지금 만 유효한 질문.
+// RAG 검색·지식 습득 대상이 아니다(실측 [rwz8]: rag-miss → 클라우드 만능답변 "기상청 참고"가
+// conf 0.3 지식으로 오염(doc#33) → 지연 제안 절차까지 돌고 정작 답변은 못 받음). 서버 /api/volatile
+// (날씨 Open-Meteo 실황 + 서버 KST 시각)로 즉시 답변하고 끝낸다 — 습득·임베딩·지연 제안 전부 우회.
+// 서버 acquireKnowledge의 2차 게이트와 같은 패턴을 공유한다.
+const VOLATILE_RE=/(날씨|기온|온도|미세먼지|초미세|황사|강수)|몇\s*시(예|야|입니|습니)|지금\s*(시간|몇\s*시)|오늘\s*(날짜|며칠|몇\s*일|몇\s*시)|무슨\s*(요일|날)|며칠(예|야|입니|습니)|오늘이\s*몇|지금이\s*몇|오늘\s*(환율|주가|코스피|코스닥|비트코인|이더리움|시세|금리|뉴스)|(비트코인|이더리움|코스피|코스닥|환율|달러)[^가힣]{0,6}(시세|얼마|가격|어때|어떻|몇)/;
+// 주의: "최신 버전은?"·"실시간 처리 방식은?" 같은 지식 질문과 겹치므로 최신·실시간 단독 어휘는 게이트에 넣지 않는다. 시세류는 코인·지수 접두+(시세|얼마…) 접미 형태만 받는다(서버 VOLATILE_Q_RE와 동일).
+// [2026-10-06 실측 [rwz8]] 진행·재개 명령 — "실행 계속 발표할까요"는 발표 이어달라는 명령이지 질문이
+// 아니다. 의문형 어미(까요)만 보고 질문으로 접수돼 rag-miss → 습득 오염(doc#34) → 정직통보 연쇄로
+// 발표가 멈췄다. 질문어(뭐/왜/설명…)가 동반되면 진짜 질문이므로 게이트에서 제외한다.
+const RESUME_CMD_RE=/(계속|이어서|이어가|다시|재개)\s*(발표|진행|실행)|(발표|진행|실행)\s*(계속|이어)|계속\s*진행/;
 // ── 슬라이드-음성 동기화 자가 점검 ──
 // renderSlide가 실제로 그린 슬라이드 인덱스와 playSentenceStream이 발화 중인 curSlideIdx가
 // 어긋나면 AI가 스스로 인지하고 "죄송합니다, 해당 페이지로 갈게요" 멘트 후 화면을 복구.
@@ -521,9 +514,12 @@ async function loadDocsFromServer(){
 // [2026-09-28, 사용자 요청: "참고 파일이 여러개일 때 PPT장표가 주로 참고할 RAG파일을 지정... 검색
 // 속도를 높이는 것"] — "주로 참고" 표시된 문서가 있으면 그걸로만 검색 범위를 좁히는 규칙은 서버
 // /api/search 쪽으로 그대로 옮겨감(doc.isPrimary 플래그 기준).
-async function searchRef(q,k=3){
-  try{return await apiJson('/ppt-agent/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,k})})}
-  catch(e){return[]}
+async function searchRef(q,k=3,opts){
+  // [2026-10-06] 서버가 {refs,suspect} 객체를 반환(발음 교정 suspect 전달). 구배열(낡은 탭↔서버 버전차)도 호환.
+  try{const j=await apiJson('/ppt-agent/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,k,noCorrect:opts&&opts.noCorrect?1:undefined})});
+    if(Array.isArray(j))return{refs:j,suspect:null};
+    return{refs:j.refs||[],suspect:j.suspect||null};
+  }catch(e){return{refs:[],suspect:null}}
 }
 async function loadRefDocs(files){
   for(const f of files){
@@ -534,21 +530,32 @@ async function loadRefDocs(files){
       refDocs.push(doc);
     }catch(e){console.warn('문서 업로드 실패:',e)}
   }
-  document.getElementById('refStatus').textContent='✅ '+refDocs.length+'개 파일, '+refDocs.reduce((s,d)=>s+d.chunkCount,0)+'개 청크';
+  // [2026-10-06] 카운트도 첨부 문서 기준 — 🧠 자동학습 지식은 목록에서 제외됐으므로 합산하면 착시
+  const _manual=refDocs.filter(d=>d.origin!=='auto');
+  document.getElementById('refStatus').textContent='✅ '+_manual.length+'개 파일, '+_manual.reduce((s,d)=>s+d.chunkCount,0)+'개 청크'+(refDocs.length>_manual.length?' (+🧠자동학습 '+(refDocs.length-_manual.length)+')':'');
   updateRefDocList();
 }
 // 설정 모달에서 문서 목록 갱신 + 내용 보기
 function updateRefDocList(){
   const el=document.getElementById('refDocList');
-  if(!refDocs.length){el.innerHTML='<p style="margin:4px 0;color:var(--mut)">없음 — 업로드 화면이나 "+ 문서 추가"로 첨부</p>';return}
-  const anyPrimary=refDocs.some(d=>d.isPrimary);
-  el.innerHTML=(anyPrimary?'<p style="margin:2px 0 8px;color:var(--ok);font-size:.7rem">⭐ 표시된 문서만 검색에 사용됩니다(속도·정확도 향상)</p>':'<p style="margin:2px 0 8px;color:var(--mut);font-size:.7rem">여러 개 첨부 시 ⭐로 주로 참고할 문서를 지정할 수 있습니다(미지정 시 전체 검색)</p>')+
-  refDocs.map((d,i)=>{
+  // [2026-10-06, 사용자 요청] 🧠 자동학습 지식은 별표 없이 항상 검색 대상이므로 설정 화면 목록에서
+  // 아예 제외 — 열람·첨삭은 관리 콘솔 지식 관리 탭이 담당한다. refDocs 배열 자체는 RAG 활성
+  // 게이트(ragEnabled&&refDocs.length)와 searchRef에 쓰이므로 표시만 걸러낸다.
+  const autoN=refDocs.filter(d=>d.origin==='auto').length;
+  const rows=refDocs.map((d,i)=>({d,i})).filter(x=>x.d.origin!=='auto');
+  if(!rows.length){
+    el.innerHTML='<p style="margin:4px 0;color:var(--mut)">없음 — 업로드 화면이나 "+ 문서 추가"로 첨부</p>'
+      +(autoN?'<p style="margin:4px 0;color:#7aa5f7;font-size:.7rem">🧠 자동학습 지식 '+autoN+'개는 별표 없이 항상 검색됩니다(관리 콘솔에서 관리)</p>':'');
+    return;
+  }
+  const anyPrimary=rows.some(x=>x.d.isPrimary);
+  el.innerHTML=(anyPrimary?'<p style="margin:2px 0 8px;color:var(--ok);font-size:.7rem">⭐ 표시 문서 + 🧠 자동학습 지식이 검색 대상입니다(미지정 첨부 문서는 검색 제외)</p>':'<p style="margin:2px 0 8px;color:var(--mut);font-size:.7rem">여러 개 첨부 시 ⭐로 주로 참고할 문서를 지정할 수 있습니다(미지정 시 첨부 문서 전체 검색). 🧠 자동학습 지식은 별표 없이 항상 검색됩니다</p>')+
+  rows.map(x=>{
+    const d=x.d,i=x.i;
     return '<div style="padding:6px 0;border-bottom:1px solid rgba(30,42,68,.3)'+(d.isPrimary?';background:rgba(52,211,153,.06)':'')+'">'+
       '<div style="display:flex;align-items:center;gap:6px">'+
         '<button class="iconBtn" style="width:22px;height:22px;font-size:.72rem;color:'+(d.isPrimary?'var(--ok)':'var(--mut2)')+'" title="'+(d.isPrimary?'주로 참고 해제':'PPT가 주로 참고할 문서로 지정')+'" onclick="toggleDocPrimary('+i+')">'+(d.isPrimary?'⭐':'☆')+'</button>'+
         '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem;color:var(--txt)">'+esc(d.name)+'</span>'+
-        (d.origin==='auto'?'<span style="color:#7aa5f7;font-size:.68rem" title="질의응답에서 자동 습득된 지식 — 관리 콘솔에서 신뢰도 조정">🧠'+((d.confidence??1)<0.45?'낮음':(d.confidence??1)<0.8?'보통':'높음')+'</span>':'')+
         '<span style="color:var(--ok);font-size:.68rem">'+d.chunkCount+'청크</span>'+
         '<button class="setBtn" style="padding:2px 8px;font-size:.68rem" onclick="toggleDocView('+i+')">보기</button>'+
         '<button class="iconBtn" style="width:20px;height:20px;font-size:.6rem" onclick="removeRefDoc('+i+')">✕</button>'+
@@ -573,15 +580,19 @@ async function toggleDocView(i){
 }
 async function removeRefDoc(idx){
   const doc=refDocs[idx];if(!doc)return;
+  // [2026-10-06, 사용자 요청] 🧠 자동학습 지식은 발표 화면에서 지우지 않는다 — 관리 콘솔 지식
+  // 관리 탭에서 신뢰도 조정·삭제한다(버튼이 없어도 도달 방지용).
+  if(doc.origin==='auto'){document.getElementById('refStatus').textContent='🧠 자동학습 지식은 관리 콘솔의 지식 관리에서 첨삭하세요';return}
   try{await apiJson('/ppt-agent/api/docs/'+doc.id,{method:'DELETE'})}catch(e){console.warn('문서 삭제 실패:',e)}
   refDocs=refDocs.filter((_,i)=>i!==idx);
   updateRefDocList();
-  document.getElementById('refStatus').textContent='✅ '+refDocs.length+'개 파일';
+  document.getElementById('refStatus').textContent='✅ '+refDocs.filter(d=>d.origin!=='auto').length+'개 파일';
 }
 // [2026-09-28, 사용자 요청] "주로 참고" 지정 토글 — 여러 개 동시 지정 가능(예: 발표 관련 자료 2개를
 // 둘 다 주력으로). 하나도 지정 안 하면 §searchRef가 전체 문서에서 검색하는 기존 동작으로 자동 복귀.
 async function toggleDocPrimary(idx){
   const doc=refDocs[idx];if(!doc)return;
+  if(doc.origin==='auto')return;  // [2026-10-06, 사용자 요청] 🧠 자동학습 지식엔 별표 개념 없음 — 항상 검색 대상
   doc.isPrimary=!doc.isPrimary;
   try{await apiJson('/ppt-agent/api/docs/'+doc.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({isPrimary:doc.isPrimary})})}
   catch(e){console.warn('primary 저장 실패:',e);doc.isPrimary=!doc.isPrimary}
@@ -1026,7 +1037,7 @@ ${s.note?'발표자 노트(최우선 소스):\n'+s.note:'(노트 없음 — 불�
 // RAG: 참고 자료에서 관련 청크 검색하여 풍부한 컨텍스트 추가
 if(ragEnabled&&refDocs.length){
   try{
-    const refs=await searchRef(s.title+' '+s.bullets.join(' '),3);
+    const refs=(await searchRef(s.title+' '+s.bullets.join(' '),3)).refs;
     if(refs.length){
       ctx+='\n\n[참고 자료 — 이 내용을 바탕으로 더 풍부하게 설명하세요 (단, 슬라이드 주제와 관련된 부분만)]\n';
       ctx+=refs.map((r,i)=>(i+1)+'. '+r.text.slice(0,300)).join('\n');
@@ -1311,11 +1322,29 @@ try{
       body:JSON.stringify({model:'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16',input:koNizeTts(text),voice:ttsVoice,language:'ko',response_format:'wav',instruct:STYLE,temperature:0.15,repetition_penalty:1.15}),signal:ac.signal});  // [2026-10-05] 0.3→0.15 — 재시도·조각마다 온도가 달라 화자 특성이 흔들리는(남성음 스침) 드리프트 완화: 1차 시도와 재시도 온도를 통일. [2026-10-05 v8] repetition_penalty 1.15 — EOS 미스 grind(동일 문장 33~39% 빈도로 max_tokens 캡까지 무음 생성, 실측 96s 캡 도달)를 28/28샘플 완전 제거, 정상 생성 속도·길이 무영향
   }catch(e){dbg('TTS[local] '+e.name+(ac.signal.aborted?'('+(TTS_TIMEOUT_MS/1000)+'s타임아웃)':'')+':'+(e.message||'').slice(0,40));throw e}
   finally{clearTimeout(to)}
-  if(!r.ok){console.warn('TTS(local) 실패:',r.status);dbg('TTS[local] HTTP'+r.status+' '+(Date.now()-_t0)+'ms');return null}
+  if(!r.ok){
+    console.warn('TTS(local) 실패:',r.status);dbg('TTS[local] HTTP'+r.status+' '+(Date.now()-_t0)+'ms');
+    // [2026-10-06, 사용자 요청] 429/5xx 일시 오류 1회 재시도 — 프록시 업스트림 순단 실측(당일 502 20회,
+    // 그 다음 요청은 1.2s 내 성공). 큐 폐기·타임아웃으로 중단된 요청은 재시도하지 않는다(폐기 의지 존중).
+    if(r.status>=429&&!(signal&&signal.aborted)){
+      await new Promise(res=>setTimeout(res,1200));
+      if(signal&&signal.aborted)return null;
+      const ac2=new AbortController();const to2=setTimeout(()=>ac2.abort(),TTS_TIMEOUT_MS);
+      if(signal)signal.addEventListener('abort',()=>ac2.abort(),{once:true});
+      try{
+        const r2=await fetch(TTS_URL,{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({model:'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16',input:koNizeTts(text),voice:ttsVoice,language:'ko',response_format:'wav',instruct:STYLE,temperature:0.15,repetition_penalty:1.15}),signal:ac2.signal});
+        if(r2.ok){const b2=await r2.blob();if(b2.size>1000&&b2.size<4000000){const _dt=Date.now()-_t0;if(playing)_presLockSet();dbg('TTS[local] OK(재시도) '+b2.size+'B '+_dt+'ms'+(_dt>=5000?' ⚠지연':''));return URL.createObjectURL(b2)}console.warn('TTS(local) 재시도: 응답 크기 이상',b2.size)}
+        else{console.warn('TTS(local) 재시도 실패:',r2.status);dbg('TTS[local] 재시도 HTTP'+r2.status)}
+      }catch(e2){dbg('TTS[local] 재시도 '+e2.name+':'+(e2.message||'').slice(0,40))}
+      finally{clearTimeout(to2)}
+    }
+    return null
+  }
   const b=await r.blob();if(b.size>1000&&b.size<4000000){const _dt=Date.now()-_t0;if(playing)_presLockSet();  // [2026-10-05] TTS 활동 하트비트 — 백그라운드 탭 인터벌 스로틀 대비 락 갱신
 dbg('TTS[local] OK '+b.size+'B '+_dt+'ms'+(_dt>=5000?' ⚠지연':''));if(_dt>=5000)qaLog('tts_slow',{ms:_dt,chars:text.length,size:b.size});return URL.createObjectURL(b)}console.warn('TTS(local): 응답 크기 이상',b.size);dbg('TTS[local] 크이상 '+b.size+'B')
 }catch(e){console.warn('TTS 예외:',e);dbg('TTS 예외:'+(e.message||e.name||'').slice(0,50))}
-dbg('TTS 실패 → 브라우저 폴백');return null}
+dbg('TTS 변환 실패 — 이 문장은 건너뜀(브라우저 폴백 없음)');return null}
 function playAudio(url){return new Promise(r=>{
   dbg('재생 모듈 진입 — '+(url?'url 있음':'url 없음'));
   if(!url){r();return}
@@ -1345,35 +1374,21 @@ function playAudio(url){return new Promise(r=>{
   audioEl.load();
 })}
 let _audioFin=null;  // 진행 중인 playAudio의 fin — pause/stop이 즉시 해제
-function speakFB(text){return new Promise(r=>{try{
-  if(!_koVoice)_koVoice=pickKoreanVoice();  // [2026-10-05] 음성 목록이 늦게 로딩된 경우 여기서 재시도 — 이국 억양 폴백 방지
-  noteSpoken(text);console.warn('TTS 폴백(브라우저 내장 음성) 사용:',text.slice(0,20));dbg('폴백(브라우저 음성): '+text.slice(0,16));autoAnno('TTS 실패 → 브라우저 폴백 전환 — 문장: '+text.slice(0,60));  // [2026-10-04] 음성오류 자동 기록
-  const u=new SpeechSynthesisUtterance(text);u.lang='ko-KR';if(_koVoice)u.voice=_koVoice;u.rate=ttsSpeed;
-  // [2026-10-04] 감시자 — Chrome에서 cancel() 후 speak()가 무시되거나 onend/onerror가 안 오는
-  // 알려진 버그가 있어, 읽기 예상시간+여유 후 강제 해제(재생 체인 사망 방지).
-  let done=false;const fin=()=>{if(done)return;done=true;clearTimeout(fbTo);ttsSpeaking=false;hideSearchIndicator();r()};
-  u.onstart=()=>{hideSearchIndicator()};
-  u.onend=fin;u.onerror=fin;
-  const fbTo=setTimeout(fin,Math.max(2500,text.length/(3.2*ttsSpeed)*1000+4000));
-  speechSynthesis.cancel();speechSynthesis.speak(u);ttsSpeaking=true;
-  setTimeout(()=>{if(!done&&!speechSynthesis.speaking&&!speechSynthesis.pending){try{speechSynthesis.speak(u)}catch(e){}}},200);
-}catch(e){hideSearchIndicator();r()}})}
-async function speak(text){
-  if(!text||text.length<2){console.warn('speak: empty text');return}
-  noteSpoken(text);
-  const url=await ttsSentence(text);
-  if(url)await playAudio(url);
-  else{console.warn('TTS fail → browser TTS fallback');await speakFB(text)}
-}
+// [2026-10-06] speakFB·speak(브라우저 내장 음성 폴백) 삭제 — 호출부가 전혀 없는 사코드. 남아 있으면
+// 낡은 탭의 동작을 설명하는 로그 해석만 해치고, 되살아날 경우 "다른 목소리" 재발 통로가 된다.
 
 // ── 에코 방지 — AI 자기 음성이 STT로 되돌아와 엉뚱한 인터럽트 유발 방지 ──
 let _lastSpoken='';      // AI가 마지막으로 말한 텍스트 (하위 호환용 참조)
-let _recentSpoken=[];    // 최근 발화 롤링 윈도우(최대 3개) — 문장 경계에 걸쳐 인식된 에코까지 잡기 위함
+let _recentSpoken=[];    // 최근 발화 롤링 윈도우(최대 8개) — 문장 경계에 걸쳐 인식된 에코까지 잡기 위함
 function noteSpoken(text){
   if(!text)return;
   _lastSpoken=text;
   _recentSpoken.push(text);
-  if(_recentSpoken.length>3)_recentSpoken.shift();
+  // [2026-10-06 7weo] 3→8 확장 — TTS 재생이 STT 블롭을 열어두면 최종 인식분에 최대 ~30초 치
+  // 내레이션이 축적돼 한 파이널로 뱉힌다. 3개 윈도우(~15초)에선 축적분의 에코 문장이 이미
+  // 밀려나 out되어 isEcho가 놓쳤고(실측 [7weo] +165.9s), 놓친 에코가 질문 본문이 돼 엉뚱한
+  // 답변 생성으로 이어졌다. 8개(~30-40초)면 블롭 축적분을 커버한다.
+  if(_recentSpoken.length>8)_recentSpoken.shift();
 }
 
 // [2026-09-29 v2] 예전엔 TTS 종료 후 1.2초간 STT 결과를 무조건 차단했는데(쿨다운), 발표자가
@@ -1418,7 +1433,10 @@ function stripEchoPrefix(t){
   // 마지막으로 나온 위치 뒤를 본문으로 삼고, 본문조차 에코로 시작하면 발화 전체를 에코로 판정해 null.
   if(!_recentSpoken.length)return null;
   const norm=s=>s.replace(/[\s,.!?~·:;'"()\-]/g,'');
-  const combined=norm(_recentSpoken.join(' '));
+  // [2026-10-06 7weo] 절단 코퍼스는 직전 3개 유지 — 윈도우를 8개로 넓힌 것은 isEcho의 탐지
+  // 범위 확대가 목적이고, 절단까지 8개를 쓰면 오래된 스크립트를 인용한 진짜 질문("아까 말씀하신
+  // …이 뭔가요")이 통째로 잘리는 과잉 절단이 생긴다. 최근 발화 꼬리 잘림 방지는 기존 동작 유지.
+  const combined=norm(_recentSpoken.slice(-3).join(' '));
   const n=norm(t);
   if(n.length<12)return null;
   let last=-1;
@@ -1459,43 +1477,93 @@ recognizer.onresult=e=>{
     // [2026-09-29] "네"/"예" 같은 한 글자 긍정 응답이 길이<2 필터에 걸려 통째로 무시되던 문제 — 예외 처리
     if((t.length<2&&!/^(네|예|응|넵|넹)$/.test(t))||isHall(t))continue;
     let intent=detectIntent(t);  // [2026-10-05] let — TTS 중 배경 의문문 게이트가 'none'으로 전환할 수 있음(const면 TypeError)
+    // [2026-10-06] 지연 답변 동의 선처리 — 제안 직후~유예 30초 안의 문두 긍정은 에코 게이트보다
+    // 먼저 동의로 확정한다. v2 실측 이후 모든 TTS 멘트에서 "네," 접두를 제거했으므로 문두 긍정은
+    // 사람 발화뿐이다. 제안 멘트 에코와 "네"가 한 파이널로 합쳐져도("네 저희의 강점은…") 동의가
+    // 살아남고, 창이 닫힌 뒤 도착한 늦은 "네"도 유예 안이면 즉시 답변으로 이어진다(실측 [fo38] —
+    // 제안 멘트 재생이 STT 블롭을 열어둬 "네" 파이널이 8초 창 종료 후에야 도달해 납실됐다).
+    if(intent==='none'&&qaState!=='pron_confirm'&&_deferAskedAt&&Date.now()-_deferAskedAt<30000&&_deferQA&&DEFER_YES_RE.test(t)){
+      if(qaState==='deferring'){_deferAskedAt=0;qaState='answering';resolveDeferred(true)}
+      else deliverDeferredNow().catch(()=>{});
+      return;
+    }
     // 에코 방지 — AI 자기 음성 or 쿨다운 중이면 무시. 단, "질문 있습니다"/"잠깐만요" 같은
     // 명시적 인터럽트 트리거는 예외 — AI 발화 도중 끼어들면 STT가 AI 발화 꼬리와 사용자 음성을
     // 한 결과로 합쳐 인식하는 경우가 흔한데, 합쳐진 문장이 길어지면 에코 판정에 걸려 트리거째로
     // 버려짐. 이런 트리거 문구는 평소 발표 스크립트에 나오지 않으므로 에코 검사를 생략해도 안전.
-    // [2026-10-05] waiting_question 상태에선 질문 의도 발화를 에코로 버리지 않는다 — "네, 질문해
-    // 주세요" 멘트와 사용자 질문이 STT에서 한 결과로 합쳐진 문장이 에코 판정에 걸려 질문째로
-    // 유실되는 것이 실측 문제("질문을 해도 인식이 안 된다"). 순수 멘트 에코는 intent가
-    // question이 아니므로 기존대로 걸러진다.
-    if(intent!=='ask'&&intent!=='pause'&&intent!=='issue'&&!(qaState==='waiting_question'&&intent==='question')&&isEcho(t)){
-      // [2026-10-05 v9b/c] 에코 접두 절단 — 발표 음성 꼬리와 사용자 발화가 STT에서 한 결과로 합쳐지면
+    // [2026-10-05 v9c → 2026-10-06] waiting_question의 질문 의도 발화는 버리지 않되 [pdao] 실측으로
+    // 전면 예외(에코 처리 스킵)는 폐지한다 — 예외가 "저희의 질문해 주세요" 같은 순수 합침발화를
+    // 질문으로 통과시켜 rag-miss 통보→쓰레기 습득→제안 사이클을 반복시켰다. 이제 절단을 먼저
+    // 시도하고, 절단이 실패해도 실질 내용(cleanQuestionText)이 남는 질문만 원문 유지한다.
+    if(intent!=='ask'&&intent!=='pause'&&intent!=='issue'&&isEcho(t)){
+      // [2026-10-06 7weo] 에코+트리거 합침 구출 — TTS 재생이 STT 블롭을 열어두면 "내레이션 축적분
+    // + 질문 있습니다"가 한 파이널로 도착한다. 이 텍스트는 전체가 에코 판정돼 통째로 폐기되고
+    // 트리거가 흔적 없이 사라진다(실측 [7weo] +165.9s: 30자+ 합침이라 detectIntent도 'ask'가
+    // 아닌 'question' — 에코 폐기 외엔 구출 경로가 없었다). 트리거 어휘가 살아 있고 트리거를
+    // 걷어낸 나머지가 짧거나 여전히 에코면 순수 트리거로 전환해 대기 진입시킨다.
+    if(intent!=='ask'&&intent!=='pause'&&intent!=='issue'
+       &&/(추가\s*|하나\s*더\s*)?질문\s*이?\s*있(어요|습니다|는데요)|질문\s*하겠|궁금한\s*게\s*있/.test(t)
+       &&isEcho(t)){
+      const _cc=cleanQuestionText(t);
+      if(!_cc||_cc.length<12||isEcho(_cc)){
+        dbg('✂ 에코+트리거 합침 — 순수 트리거로 전환: "…'+t.slice(-16)+'"');
+        t='질문 있습니다';intent='ask';
+      }
+    }
+    // [2026-10-05 v9b/c] 에코 접두 절단 — 발표 음성 꼬리와 사용자 발화가 STT에서 한 결과로 합쳐지면
       //("…설명드리겠습니다 아까 질문한 거 찾아봤어요") 에코 판정이 통째로 묻거나, 게이트 미스 시
       // 스크립트가 질문 본문에 섞여 LLM 컨텍스트를 오염시킨다(실측 [i5el] 12:57 qa_log). 최근 발화에
       // 등장하는 접두부를 최대한 잘라내고, 남은 본문으로 인텐트를 다시 매겨 유효한 발화는 구출한다.
       const rest=t.length>=12?stripEchoPrefix(t):null;
+      // [2026-10-06] 실질 내용이 남는 대기 질문은 절단이 실패해도 유지(v9c 구출의 축소판 — 무내용
+      // 합침발화는 아래 무결성 게이트가 폐기하므로 이 구출이 오염 질문을 다시 밀어줄 일은 없다)
+      const rescue=qaState==='waiting_question'&&intent==='question'&&!!cleanQuestionText(t);
       if(rest&&rest.length>=4){
         const ni=detectIntent(rest);
         if(ni!=='none'){
           dbg('✂ 에코 접두 제거: "'+rest.slice(0,24)+'" ('+intent+'→'+ni+')');
           t=rest;intent=ni;
+        }else if(rescue){
+          dbg('✂ 절단 판정 불가 — 질문 원문 유지: "'+t.slice(0,24)+'"');
         }else{
           console.log('에코 무시:',t.slice(0,20));
           dbg('🔇 에코 무시: "'+t.slice(0,24)+'"');  // [2026-10-05 v9] 서버 로그 재구성용 적립 — 기존엔 브라우저 콘솔 전용이라 원격 진단 불가
           continue;
         }
+      }else if(rescue){
+        dbg('✂ 절단 실패 — 질문 원문 유지: "'+t.slice(0,24)+'"');
       }else{
         console.log('에코 무시:',t.slice(0,20));
         dbg('🔇 에코 무시: "'+t.slice(0,24)+'"');
         continue;
       }
     }
+    // [2026-10-06 pdao] 질문 무결성 게이트 — 시스템 방금 말이 끼어든 합침발화에서 멘트 어휘를
+    // 걷어내고도 실질 내용이 4자 미만이면 질문이 아니다. [pdao] 실측: "저희의 질문해 주세요"·
+    // "질문해 주세요 위즈베이스가…" 같은 무내용/오염 질문이 rag-miss 통보→습득→제안 사이클을
+    // 태워 발표가 반복 중단됐다. 통과 시 클린 텍스트로 교체해 LLM 컨텍스트·RAG 검색·제안 멘트
+    // ("조금 전에 질문하신 질문해 주세요…" 이중 호칭) 오염을 동시에 끊는다. deferring에선
+    // 동의 판정(DEFER_YES_RE)이 원문을 보므로 폐기만 하고 치환은 하지 않는다.
+    if((intent==='question'||intent==='intent')&&(qaState==='waiting_question'||qaState==='confirming'||qaState==='deferring')){
+      const cq=cleanQuestionText(t);
+      if(!cq){dbg('🔇 무내용 질문 폐기: "'+t.slice(0,24)+'"');if(qaState==='waiting_question')scheduleWaitQTimer();continue}
+      if(cq!==t&&qaState!=='deferring'){dbg('🧹 질문 멘트 정리: "'+cq.slice(0,24)+'"');t=cq}
+    }
     // [2026-10-05] 문제 기록 명령 — 모든 상태에서 최우선 처리. 발표 흐름(정지/재개/타이머)을
     // 건드리지 않고 기록만 하고 계속한다.
     if(intent==='issue'){captureIssue(t);continue}
+    // ── [2026-10-06] 발음 확인 응답 — "네/아니요"만 받고 애매한 발화는 응답 시간만 연장 ──
+    if(qaState==='pron_confirm'){
+      clearTimeout(_pronTimer);
+      if(PRON_NO_RE.test(t)){const r=_pronResolve;_pronResolve=null;if(qaState==='pron_confirm')qaState='answering';if(r)try{r(false)}catch(e){}return}
+      if(PRON_YES_RE.test(t)){const r=_pronResolve;_pronResolve=null;if(qaState==='pron_confirm')qaState='answering';if(r)try{r(true)}catch(e){}return}
+      _pronTimer=setTimeout(pronConfirmTimeout,6000);  // 애매한 발화 — 응답 시간 연장
+      return;
+    }
     // ── qaState별 라우팅 ──
     if(qaState==='waiting_question'){
       if(intent==='ask'||intent==='pause'){scheduleWaitQTimer();continue}  // 이미 대기 중 → 재요청은 무시하되 대기 시간 연장
-      if(intent==='question'||intent==='intent'||t.length>10){
+      if(intent==='question'||intent==='intent'||t.length>10||VOLATILE_RE.test(t)){
         clearTimeout(_waitQTimer);
         qaState='answering';handleInterruption(t);return;
       }
@@ -1527,7 +1595,7 @@ recognizer.onresult=e=>{
       // 이어진 촉발점). "다른 질문 없으시면?" 직후의 응답 자리니 재개·긍정·거절 계열이 아닌 8자+
       // 발화는 질문으로 본다(이 상태에 도달한 발화는 이미 에코 게이트를 통과했다).
       if(RESUME_RE.test(t)){qaState='idle';resumeFromInterrupted();return}
-      if(t.length>=8){qaState='answering';handleInterruption(t);return}
+      if(t.length>=8||VOLATILE_RE.test(t)){qaState='answering';handleInterruption(t);return}  // [2026-10-06] VOLATILE — "날씨 어때요"(6자)류 짧은 실시간 질문도 접수
       // 애매한 발화 — 재촉하지 않고 응답 시간을 좀 더 준다
       scheduleConfirmTimer();
       return;
@@ -1556,7 +1624,7 @@ recognizer.onresult=e=>{
         setStatus('▶ 다음으로 진행');
         return;
       }
-      if(/^(네|예|넵|넹|응|좋아|좋아요|그래|그래요|맞아|드려|들려|궁금)/.test(t)){
+      if(DEFER_YES_RE.test(t)){
         qaState='answering';resolveDeferred(true);return;  // 답변 재생은 슬라이드 체인이 이어서
       }
       // [2026-10-05 v9c] 동의/거절 어미 없는 실질 발화는 새 질문으로 — 8초 연장 뒤 유실 방지
@@ -1578,7 +1646,7 @@ recognizer.onresult=e=>{
         speakUnified('말씀해 주세요.').then(()=>{_closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},8000)});
         return;
       }
-      if(intent==='question'||intent==='intent'||t.length>10){
+      if(intent==='question'||intent==='intent'||t.length>10||VOLATILE_RE.test(t)){  // [2026-10-06] VOLATILE — 종료 Q&A 중 "날씨 어때요"류도 접수
         (async()=>{
           qaState='answering';
           await handleInterruption(t,true);  // closing 흐름 — handleInterruption의 확인 멘트는 생략(아래서 직접 처리)
@@ -1638,17 +1706,28 @@ recognizer.onresult=e=>{
       if(audioEl){audioEl.pause();audioEl=null}
       try{speechSynthesis.cancel()}catch(e){}
       ttsSpeaking=false;interrupted=true;
+      qaState='answering';  // [2026-10-06 7weo] 답변 재생 중 재발화가 아래 v9 _pendingQ 흡수 분기에 걸리게 — 이 경로는 qaState를 안 바꿔서 답변 중 발화가 `!playing||interrupted`에서 무조건 버려졌다(실측 [7weo] +173.5s: "질문이 있어요" 재시도가 흔적 없이 유실)
       handleInterruption(t);return;
     }
     // [2026-10-05] TTS 발화 중 짧은 무질서 의문문 게이트 — 배경 대화("밥 먹었어?" 등)가 물음표
     // 하나로 발표를 끊는 것 방지. 질문어가 전혀 없는 10자 미만 의문문은 배경 소음으로 간주해
     // 기존 지속 대화 감지(10초 내 3회)로 넘긴다. 명시적 질문어("왜","무엇","알려줘"…)은 통과.
     if(ttsSpeaking&&intent==='question'&&t.length<10&&!/(어떻|왜|무엇|뭐|누가|언제|어디|어느|몇|얼마|무슨|어떤|궁금|알려|설명|질문)/.test(t))intent='none';
+    // [2026-10-06 실측 [rwz8]] 발표 재생 중 에코 파편 게이트 — 나레이션 꼬리("을 바탕으로 ai와",
+    // "a랑한")가 조각으로 최종 인식되면 트리거·의문어 없이도 question/intent로 흘러 발표를 끊는다.
+    // 명시적 질문어와 휘발성 질문("오늘 날씨 어때요"류는 7자 내외로 짧다 — 절대 폐기 금지)은 통과,
+    // 그 외 공백 제거 8자 미만 발화는 에코 파편으로 보고 폐기한다(발표 끊김·rag-miss 오염 예방).
+    if((intent==='question'||intent==='intent')&&t.replace(/\s/g,'').length<8&&!VOLATILE_RE.test(t)&&!/(어떻|왜|무엇|뭐|뭔|누가|언제|어디|어느|몇|얼마|무슨|어떤|궁금|알려|설명|질문|잠깐|잠시|멈춰|정지)/.test(t)){
+      dbg('🔇 발표 중 파편 폐기(에코 방어): "'+t.slice(0,12)+'"');
+      qaLog('echo_fragment_dropped',{t:t.slice(0,60)});
+      return;
+    }
     if(intent==='question'||intent==='intent'){
       // 직접 질문 또는 기타 인텐트 → 즉시 인터럽트+답변
       if(audioEl){audioEl.pause();audioEl=null}
       try{speechSynthesis.cancel()}catch(e){}
       ttsSpeaking=false;
+      qaState='answering';  // [2026-10-06 7weo] ask 경로와 동일 — 답변 재생 중 발화 유실 방지(실측 [7weo] +173.5s)
       handleInterruption(t);return;
     }
     // intent === 'none' → 배경 소음/맞장구는 계속 발표하되, 대화가 지속되면(10초 내 3회) 잠시 멈추고 확인
@@ -1681,6 +1760,28 @@ let _plainFillerIdx=0;
 const PLAIN_FILLERS=['확인해 보겠습니다.','알겠습니다, 잠시만요.'];  // [2026-10-06, 사용자 지적] "답변 드리겠습니다/바로 답변 드릴게요" 제외 — 추임새가 의도 멘트를 미리 말한 뒤 rag-miss 통보("지식이 없습니다…답변드리겠습니다")·동의 훅("답변 드리겠습니다")과 이중·삼중 발화됐다. 추임새는 중립만, "답변드릴게요"는 실제 답변 직전(동의 훅·브리지)에만 한 번 말한다. [2026-10-05] "네," 접두 제거 — CACHED_PHRASES와 동일 사유(조기 EOS)
 function nextPlainFiller(){return PLAIN_FILLERS[_plainFillerIdx++%PLAIN_FILLERS.length]}
 
+// [2026-10-06] 서술형 거절 탐지 — 실측 [b6h5]: 센티널 토큰 없이 "로컬 데이터베이스에서 없는 내용은
+// 답변드릴 수 없습니다"류 서술 거절이 나오면 토큰 검문을 통과해 답변으로 제공됐고, 지연 제안
+// ("드려도 될까요?")→동의("네")→"답변드리겠습니다" 뒤에 거절이 이어지는 맥락 붕괴가 됐다.
+// 사용자 지시: "답을 RAG에 구성하지 못했다면 중간에 답변할 것처럼 개입하면 안 된다".
+// 첫 문장(공백 정규화)에서 "시스템 발화형" 거절 패턴을 찾거나 너무 짧으면 답변이 아니라고 판정한다.
+// 단독 "찾을 수 없다/알 수 없다"는 정보 서술("레거시에서는 찾을 수 없습니다. 클라우드 전용입니다")과
+// 겹치므로 제외하고, 목적어를 동반한 형태("자료를 찾을 수 없습니다")만 인정한다 — 거짓 양성(정상
+// 답변 폐기)보다 거짓 음성(거절을 개입시킴)이 실측 피해가 크다.
+function isRefusalAnswer(a){
+  const s=String(a||'').replace(/\s+/g,'');
+  if(s.length<15)return true;                   // 너무 짧으면 답변이 아니다
+  if(/^죄송/.test(s)){
+    if(s.length<40)return true;                 // 사과 단답 = 정직 거절 상수 포함
+    // [2026-10-06 pdao] 사과-선두 장문 거절 — "죄송합니다. 답변하지 못한 질문은 기록하겠습니다…"
+    // 같은 답은 첫 문장만 검사하면 통과해 그대로 재생됐다. 사과로 열린 답변 본문 어디든 거절
+    // 서술이 있으면 개입하지 않는다(사용자 지시: 답을 구성하지 못했으면 답변처럼 개입 금지).
+    return /답변하지못한|답변드리지못한|기록하겠|기록해두|찾지못했|답변드릴수없|답변할수없|나중에답변드리|발표후에답변/.test(s);
+  }
+  const first=(s.split(/[.!?…]/)[0]||s);
+  return /답변드릴수없|답변할수없|답변드리기어렵|말씀드리기어렵|찾지못했|정보가없|자료가없|근거가없|없는내용|정보를찾을수없|자료를찾을수없|문서를찾을수없|관련내용을찾을수없/.test(first);
+}
+
 async function generateAnswer(q,ragPromise,stats){
   const s=slides[curSlideIdx];
   // [2026-10-05 v2] 센티널 강제 — 실측(발표 [b0tm] 후속): "답하거나 ~로 마무리"식 이중 지시는
@@ -1696,7 +1797,19 @@ async function generateAnswer(q,ragPromise,stats){
       // 단 예산(RAG_BUDGET_MS) 초과 시 참고자료 없이 진행 — "검색하느라 답변이 안 나오는" 실측
       // 지연을 끊는다. 초과 여부는 stats.ragTimeout으로 기록해 폐루프에서 회귀 추적.
       const _rt0=Date.now();
-      const refs=await Promise.race([ragPromise||searchRef(q,3),new Promise(r=>setTimeout(()=>r(null),RAG_BUDGET_MS))]);
+      const _rs=await Promise.race([ragPromise||searchRef(q,3),new Promise(r=>setTimeout(()=>r(null),RAG_BUDGET_MS))]);
+      // [2026-10-06] searchRef가 {refs,suspect} 반환(발음 교정) — 구배열(낡은 탭↔서버 버전차)도 호환 정규화
+      let refs=_rs===null?null:(Array.isArray(_rs)?_rs:(_rs.refs||[]));
+      const _suspect=_rs&&!Array.isArray(_rs)?(_rs.suspect||null):null;
+      if(stats&&_suspect)stats.pronSuspect=_suspect;
+      // [2026-10-06, 사용자 요청] 발음 확인 1회 — ASR 오타 교정 suspect가 붙었고 라이브 질문 흐름이면
+      // "혹시 '~' 말씀이신가요?"라고 한 번 확인한다. "아니요"면 교정 없이 원문 질의로 재검색.
+      // 무응답 타임아웃이면 교정 검색을 그대로 믿고 진행한다(방해 최소화).
+      if(_suspect&&stats&&stats.confirmSuspect){
+        const ok=await pronConfirmAsk(_suspect);
+        if(ok===false){dbg('🗣 발음 확인 "아니요" — 교정 없이 재검색');refs=(await searchRef(q,3,{noCorrect:true})).refs;if(stats)stats.pronRecheck=true}
+        else if(ok===true){if(stats)stats.pronConfirmed=true}
+      }
       if(refs===null){if(stats){stats.ragTimeout=true;stats.ragMs=Date.now()-_rt0}}
       else{
         if(stats)stats.ragMs=Date.now()-_rt0;
@@ -1731,7 +1844,9 @@ async function generateAnswer(q,ragPromise,stats){
   if(!ans)ans='죄송합니다, 발표 후 더 자세히 답변드리겠습니다.';
   // [2026-10-05 v2] 센티널 판정 — LLM이 근거 없음을 토큰으로 선언하면 정직 거절 멘트로 교체.
   // 참조 점수로는 관련/무관 구분이 불가(0.376 vs 0.374 실측)하므로 이 판정이 거절의 본대.
-  if(ans.includes(NO_ANSWER_TOKEN)){
+  // [2026-10-06] 서술형 거절도 동일 처리 — 토큰 누락 거절이 답변으로 흘러나오는 것을 막고
+  // rag-miss 흐름(습득→지연 답변)으로 승격시킨다.
+  if(ans.includes(NO_ANSWER_TOKEN)||isRefusalAnswer(ans)){
     if(stats){stats.ragMiss=true;stats.engine='rag-miss'}
     return RAG_MISS_MSG;
   }
@@ -1776,7 +1891,7 @@ function captureIssue(q){
 // 기존의 "다시 질문해 주세요" 즉석 안내는 이 제안 방식으로 대체(청중 앞 재요청 부담 제거).
 const KNOWLEDGE_RECHECK_MS=25000;  // 재확인 폴링 간격 — 클라우드 답변+임베딩 왕복(수 초~수십 초) 감안
 const DEFER_MAX_TRIES=8;           // 25s×8≈3분 20초 — 이 안에 습득 미확인이면 제안 조용히 취소
-let _knowRecheckTimer=null,_deferQA=null,_deferTimer=null,_deferResolve=null;
+let _knowRecheckTimer=null,_deferQA=null,_deferTimer=null,_deferResolve=null,_deferAskedAt=0;  // _deferAskedAt: [2026-10-06] 마지막 제안(동의 질문) 시각 — 늦은 "네" 유예 판정 기준
 function startDeferredQA(q){
   clearTimeout(_knowRecheckTimer);
   _deferQA={q:String(q).slice(0,300),status:'acquiring',tries:0,answer:null,started:Date.now()};
@@ -1787,13 +1902,15 @@ async function deferRecheck(){
   d.tries++;
   try{
     if(ragEnabled&&refDocs.length){
-      const refs=await searchRef(d.q,1);
+      const refs=(await searchRef(d.q,1)).refs;
       if(refs&&refs.length&&refs[0].origin==='auto'){
         d.status='answering';  // 루프 재스케줄 차단 — 답변 텍스트 생성 중
         dbg('🧠 자동 습득 확인 — 답변 생성 시작');
         const _st={errors:[]};
-        const _a=await generateAnswer(d.q,searchRef(d.q,3).catch(()=>[]),_st).catch(()=>null);
-        if(_a&&!_a.includes(NO_ANSWER_TOKEN)){
+        const _a=await generateAnswer(d.q,searchRef(d.q,3),_st).catch(()=>null);
+        // [2026-10-06] ready 게이트 — 거절 서술은 "답변이 구성됐다"고 보지 않는다. 사용자 지시:
+        // 발표 도중 개입은 답변이 실제로 있을 때만. 거절이면 제안·동의 절차 없이 조용히 취소한다.
+        if(_a&&!_a.includes(NO_ANSWER_TOKEN)&&!isRefusalAnswer(_a)){
           d.answer=_a;
           if(qaState==='closing_qa'){  // 발표 종료 후 Q&A 중 완성 — 슬라이드 훅이 없으니 즉시 제공
             d.status='asked';
@@ -1808,7 +1925,13 @@ async function deferRecheck(){
             setStatus('🧠 아까 질문의 답변 준비 완료 — 잠시 후 말씀드리겠습니다');
             dbg('🧠 지연 답변 준비 완료 — 다음 문장 경계에서 일시정지·제안');
           }
-        }else{d.status='expired';d.answer=null;dbg('⚠ 습득 확인됐으나 답변 생성 실패 — 제안 취소')}
+        }else{
+          // [2026-10-06 22b8] 취소만 하고 끝나면 rag-miss 통보의 "찾아 답변드리겠습니다" 약속이 깨진
+          // 채 남는다(운영자 질문: "지식은 임베딩됐는데 왜 답변이 없나"). refused 플래그를 남겨 섹션
+          // 경계에서 한 번 사실대로 마무리하게 한다. 판정 근거를 로그에 남겨 오탐 진단도 가능하게.
+          d.status='expired';d.answer=null;d.refused=true;
+          dbg(_a?'⚠ 습득 답변이 거절 서술 — 취소: "'+String(_a).replace(/\s+/g,' ').slice(0,60)+'"':'⚠ 습득 확인됐으나 답변 생성 실패 — 취소');
+        }
       }
     }
   }catch(e){}
@@ -1825,10 +1948,11 @@ function offerText(q){
   if(!s)s='아까 질문';
   return '조금 전에 질문하신 '+s+'에 대하여 답변 드려도 될까요?';
 }
-// 발표 도중(다음 문장 경계)에서 호출 — 동의("네")면 true, 거절·무응답(8초)이면 false로 귀결
+// 발표 도중(섹션 경계 — 슬라이드 서술 종료 후 전환 전)에서 호출 — 동의("네")면 true,
+// 거절·무응답(8초)이면 false로 귀결
 function offerDeferredAnswer(){
   const d=_deferQA;if(!d||d.status!=='ready')return Promise.resolve(false);
-  d.status='asked';
+  d.status='asked';_deferAskedAt=Date.now();  // [2026-10-06] 동의 유예 창 기준점 — 늦은 "네" 접수 판정
   const qb=document.getElementById('qaBox');qb.style.display='block';qb.textContent='💬 대기 중인 질문: '+d.q.slice(0,80);
   return new Promise(resolve=>{
     _deferResolve=resolve;
@@ -1836,7 +1960,7 @@ function offerDeferredAnswer(){
     setStatus('💬 답변 제안 — "네" 또는 "다음으로"');
     speakUnified(offerText(d.q)).then(()=>{
       clearTimeout(_deferTimer);
-      _deferTimer=setTimeout(()=>{if(qaState==='deferring'){qaState='idle';resolveDeferred(false);dbg('⏱ 답변 제안 무응답 — 다음 진행')}},8000);
+      _deferTimer=setTimeout(deferOfferExpiry,8000);  // [2026-10-06] 공용 만료 — 1차 재제안, 2차 조용히 만료
     });
   });
 }
@@ -1845,14 +1969,107 @@ function resolveDeferred(v){
   const r=_deferResolve;_deferResolve=null;
   if(r)try{r(v)}catch(e){}
 }
+// [2026-10-06] 동의 문두 정규식 — 제안 응답 라우팅(1559행 인라인)과 유예 선처리가 같은 패턴을 쓴다.
+// "드려/들려/궁금" 포함 — "드려도 되죠?"처럼 동의사를 되묻는 발화도 긍정으로 본다.
+const DEFER_YES_RE=/^(네|예|넵|넹|응|좋아|좋아요|그래|그래요|맞아|드려|들려|궁금)/;
+// [2026-10-06, 사용자 요청] 발음 확인 — 서버 교정 suspect("위저베이스"→"위즈베이스"류)가 붙은 라이브
+// 질문에서 발표를 잠깐 멈추고 1회 확인한다. "네"=교정 검색 진행, "아니요"=교정 없이 원문 재검색,
+// 8초 무응답=교정 검색 그대로 진행(방해 최소화). 지연 답변(deferRecheck) 경로에선 confirmSuspect가
+// 없어 확인 없이 조용히 교정 검색만 쓴다.
+const PRON_YES_RE=/^(네|예|넵|넹|응|맞아|맞아요|맞습니다|맞죠|그렇|그래|그래요|유)/;
+const PRON_NO_RE=/^(아니|아뇨|아니요|아닙니다|다른|틀렸|그게\s*아니|그거\s*아니)/;
+let _pronResolve=null,_pronTimer=null;
+function pronConfirmTimeout(){
+  const r=_pronResolve;_pronResolve=null;
+  if(qaState==='pron_confirm')qaState='answering';
+  dbg('⏱ 발음 확인 무응답 — 교정 검색으로 진행');
+  if(r)try{r(null)}catch(e){}
+}
+async function pronConfirmAsk(suspect){
+  const word=(suspect&&suspect.to)||'';
+  dbg('🗣 발음 확인 — "'+((suspect&&suspect.from)||'?')+'" → "'+word+'" ('+((suspect&&suspect.rule)||'')+')');
+  let res;
+  const p=new Promise(r=>{res=r});
+  _pronResolve=v=>{clearTimeout(_pronTimer);_pronResolve=null;if(qaState==='pron_confirm')qaState='answering';res(v)};
+  qaState='pron_confirm';
+  try{document.getElementById('qaBox').textContent='🔊 발음 확인: "'+word+'" 맞으신가요?'}catch(e){}
+  await speakUnified('혹시 '+word+' 말씀이신가요?').catch(()=>{});
+  // 멘트 재생이 끝난 뒤부터 8초 창 — 재생 중 STT 블롭이 열려 응답이 늦게 도달하는 실측(fo38) 감안
+  if(_pronResolve!==null)_pronTimer=setTimeout(pronConfirmTimeout,8000);
+  return p;
+}
+// [2026-10-06] 제안 무응답 만료 공용 — 실측 [fo38]: 제안 멘트 재생이 STT 발화 블롭을 길게 열어
+// 사용자의 "네"가 다음 파이널 방출까지 끌렸고 8초 창이 그 사이 닫혀 답변이 영구 납실됐다
+//(+71.4s 준비 → +95.9s 무응답, "네" 파이널 미도착). 1차 만료는 _deferQA를 'ready'로 되돌려
+// 다음 섹션 경계 훅이 한 번 더 묻게 하고(offerText는 이미 TTS 캐시돼 즉시 재생), 2차 만료에
+// 조용히 만료시킨다(기존 동작).
+function deferOfferExpiry(){
+  if(qaState!=='deferring')return;
+  qaState='idle';resolveDeferred(false);
+  document.getElementById('qaBox').style.display='none';
+  const d=_deferQA;
+  if(d&&d.status==='asked'&&!(d.asks>0)){
+    d.asks=1;d.status='ready';
+    d.reofferAt=Date.now()+45000;  // [2026-10-06] 문장 경계 개입 전환 — 유예 없으면 다음 문장(~4초 뒤)에 바로 되물어 성가심
+    dbg('⏱ 답변 제안 무응답(1차) — 45초 유예 후 문장 경계에서 한 번 더 물어봄');
+    return;
+  }
+  if(d&&d.status==='asked')d.status='expired';
+  // _deferAskedAt는 의도적으로 0으로 끄지 않는다 — 만료 직후 도착하는 늦은 "네"를 30초 유예 안에서
+  // 받기 위함(onresult 선처리 게이트). 사용자가 조용히 넘어가면 30초 뒤 게이트가 저절로 꺼진다.
+  dbg('⏱ 답변 제안 무응답 — 다음 진행');
+}
+// [2026-10-06] 늦은 동의 접수 — 제안 창이 닫힌 뒤(재제안 대기·만료 유예 30초) 도착한 문두 긍정을
+// 받아 발표를 끊고 즉시 답변한다. handleInterruption과 동일한 중단 절차를 밟고, 배달 중 새
+// 인터럽트(_qaGen 증가)·정지가 끼면 재개를 포기한다(그 흐름이 주도).
+async function deliverDeferredNow(){
+  const d=_deferQA;
+  _deferAskedAt=0;
+  if(!d||!d.answer){if(d)d.status='expired';return}
+  _deferQA=null;
+  const g=_qaGen;
+  dbg('🧠 늦은 동의 접수 — 지연 답변 즉시 제공');
+  interrupted=true;
+  if(audioEl){audioEl.pause();audioEl=null}
+  try{speechSynthesis.cancel()}catch(e){}
+  ttsSpeaking=false;
+  document.getElementById('qaBox').style.display='none';
+  setStatus('💬 대기 질문 답변 재생');
+  await speakUnified('답변 드리겠습니다.');
+  if(g!==_qaGen||!playing)return;
+  await speakQaAnswer(d.answer);
+  qaLog('deferred_answer',{late:true,waitMs:Date.now()-d.started,chars:(d.answer||'').length});
+  qaFlushLog({state:'deferred_answer',q:d.q,late:true,waitMs:Date.now()-d.started});
+  if(g!==_qaGen||!playing)return;
+  resumeFromInterrupted();
+}
 // [2026-10-05 v9d] 습득 품질 게이트 — 실측 오염 2건(#7 불만 원문 "왜 대답 안 하죠", #8 STT 잡음
 // "무슨 얘기를 왜 벌써 울고 있어")이 그대로 임베딩됐고, /api/search는 신뢰도를 랭킹에 반영하지 않아
 // 쓰레기 청크가 정상 지식과 동등 경쟁했다(둘 다 conf 0.3으로 시스템도 불확실했다). 발표장 질문은
 // 존댓말 어미(요/까요/세요/습니다)이거나 영문 용어를 포함하는 게 일반적 — 둘 다 아니면 영구 지식화만
 // 보류한다(답변 시도·거절 통보·폐루프 적재는 그대로 진행되고, 습득은 🧠 탭에서 수동 가능).
+// [2026-10-06 pdao] 질문 텍스트 정리 — TTS 멘트·트리거 문구가 섞인 합침발화에서 시스템 어휘를
+// 걷어낸 실질 본문을 돌려준다. 남는 내용이 4자 미만(무내용)이면 null — 질문 접수 게이트와 습득
+// 품질 게이트(acquireWorthy)가 함께 쓴다. "저희 강점이 뭐예요"처럼 사람 질문 본문에 자연스러운
+// 어휘(저희/우리)는 건드리지 않는다.
+function cleanQuestionText(t){
+  let s=String(t||'').replace(/\s+/g,' ');
+  // [2026-10-06 7weo] "알려 주세요/설명해 주세요" 제거 — 이건 시스템 멘트가 아니라 사용자 질문의
+  // 어미다(시스템은 "질문해 주세요/말씀해 주세요"만 말한다). 걷어내면 "…자세히 설명해 주세요"가
+  // "…자세히"가 돼 존댓말 어미 검사가 깨져 acquireWorthy가 false → 습득 보류로 답변이 영영
+  // 안 오는 일이 벌어졌다(실측 [7weo] +36~39s: ragTop 0.47로 검색은 됐는데 습득만 막힘).
+  s=s.replace(/(질문해\s*주세요|말씀해\s*주세요|(추가\s*|하나\s*더\s*)?질문\s*이?\s*있(어요|습니다|는데요)|답변\s*드리겠습니다|바로\s*답변\s*드릴게요|드려도\s*될까요|궁금한\s*게\s*있어요|궁금한\s*것이\s*있습니다)/g,' ');
+  s=s.split(' ').filter(w=>!/^(네|예|넵|넹|응|음|어|아|저기|그니까|그러니까|좀)[.,!?]?$/.test(w)).join(' ');
+  s=s.replace(/\s+/g,' ').trim();
+  return s.replace(/\s/g,'').length>=4?s:null;
+}
 function acquireWorthy(q){
   const s=String(q||'').trim();
   if(!s)return false;
+  if(!cleanQuestionText(s))return false;  // [2026-10-06 pdao] 멘트·에코만 남는 질문은 존댓말 어미여도 지식화 금지 — 오염 지식 적재 차단
+  if(VOLATILE_RE.test(s))return false;  // [2026-10-06] 휘발성 질문(오늘 날씨·시각류)은 /api/volatile 즉답 경로 담당 — 지식화하면 검색 오염(실측 doc#33)
+  if(/니까[요]?\s*[.?!]?\s*$/.test(s))  // [2026-10-06] -니까 인과 어미는 대화 조각이 많음(doc#27/28 지식화 오염 실측) — 정식 의문형(-입니까/-습니까, 합니까 융합형 포함)이나 명확한 의문어 동반 시에만 지식화
+    return /(스|입)니까\s*[.?!]?\s*$/.test(s)||/(무슨|어떤|어떻|왜|언제|어디|누구|몇|뭐|뜻|의미|알려|설명|궁금|질문)/.test(s);
   if(/(요|까|습니다)\s*[.?!]?\s*$/.test(s))return true;   // 존댓말 어미
   if(/[a-zA-Z]{2,}/.test(s))return true;                  // 영문 용어(ssot, rbac, jev…)
   return false;
@@ -1863,6 +2080,41 @@ function requestKnowledgeAcquire(q){
       body:JSON.stringify({q:String(q).slice(0,300),context:(slides[curSlideIdx]||{}).title||''})}).catch(()=>{});
     dbg('🧠 지식 자동 습득 요청: '+String(q).slice(0,40));
   }catch(e){}
+}
+
+// [2026-10-06, 사용자 요청] 휘발성 질문 즉시답변 — 서버 /api/volatile(날씨 Open-Meteo 실황·서버 KST
+// 시각, LLM 왕복 없음)로 바로 답하고 발표를 재개한다. RAG·LLM·지식 습득·지연 제안 어디에도 가지
+// 않는다 — 오늘만 유효한 정보는 지식화 금지(실측 doc#33 오염). 흐름은 본격 질문 경로를 축소해 재사용:
+// 프리페치 폐기 → 중립 추임새 → 실답("답변 드릴게요"는 speakQaAnswer 브리지가 담당) → 재개.
+async function answerVolatile(q,gen){
+  const qa=document.getElementById('qaBox');qa.style.display='block';
+  qa.textContent='💬 질문: '+q;
+  setStatus('💬 실시간 정보 확인 중…');
+  const purged=purgePrefetchTts();
+  qaLog('purge_prefetch',{n:purged});
+  const filler=speakUnified(nextPlainFiller());
+  const t0=Date.now();
+  let ans='';
+  try{
+    const j=await apiJson('/ppt-agent/api/volatile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:String(q).slice(0,200)})});
+    ans=(j&&j.answer)||'';
+  }catch(e){}
+  await filler.catch(()=>{});
+  if(gen!==_qaGen)return;
+  if(!ans)ans='죄송합니다, 실시간 정보를 지금 확인할 수 없습니다.';
+  qa.textContent+='\n\n💡 '+ans.slice(0,200);
+  setStatus('💬 답변 음성 생성 중…');
+  qaLog('volatile_answer',{via:'direct',ms:Date.now()-t0,chars:ans.length});
+  qaFlushLog({state:'volatile_answer',q:String(q).slice(0,300),answer:ans.slice(0,400)});
+  await speakQaAnswer(ans);
+  if(gen!==_qaGen)return;
+  qaState='idle';
+  // [2026-10-06] 종료 Q&A 중엔 재개할 발표가 없다 — 여기서 끝내고 마무리 멘트("더 질문
+  // 있으신가요?")는 호출부(closing_qa 래퍼)가 담당한다(이중 멘트 방지).
+  if(!playing){setStatus('💬 더 질문을 기다리는 중…');return}
+  if(_pendingQ){const _nq=_pendingQ;_pendingQ=null;dbg('🔁 대기 질문 이어받기: "'+_nq.slice(0,24)+'"');handleInterruption(_nq);return}
+  setStatus('▶ 발표 재개');
+  resumeFromInterrupted();
 }
 
 // [2026-10-05] 답변 음성 — 설정 음성만 사용. 생성 실패 시 브라우저 다른 음성으로 폴백하지 않고
@@ -1937,14 +2189,65 @@ async function handleInterruption(q,fromClosing){
     dbg('🔗 메타 질문 재링크: "'+q.slice(0,20)+'" → "'+_lastQ.slice(0,24)+'"');
     q=_lastQ;
   }
+  // [2026-10-06 22b8] 질문 정리 — "추가 질문이 있습니다 데이터브릭스가…"처럼 트리거 문구가 합쳐진 채로
+  // 들어오면 RAG 검색·지식 습득 문서명·LLM [질문] 컨텍스트를 함께 오염시킨다(실측: "자동학습: 추가
+  // 질문이 있습니다 …" 문서 생성 + 소음 때문에 즉시답변·습득 답변이 모두 거절 서술로 기울어 취소).
+  // 모든 질문 진입(waiting/confirming/closing/트리거 합침)이 거치는 단일 깔때기라 여기서 한 번 정리.
+  const _cq=cleanQuestionText(q);
+  if(_cq&&_cq!==q){dbg('🧹 질문 정리: "'+_cq.slice(0,30)+'"');q=_cq}
+  // [2026-10-06, 사용자 요청] 휘발성 질문 분기 — "오늘 날씨 어때요"류는 RAG·습득 없이 /api/volatile로
+  // 즉시 답한다. 실측([rwz8]): rag-miss → 클라우드 만능답변이 conf 0.3 지식으로 오염(doc#33) → 지연
+  // 제안 절차까지 돌고 정작 날씨 답변은 못 받음. 이 분기를 통과하면 acquire·deferred·rag-miss 폐루프에
+  // 전혀 들어가지 않는다(서버 acquireKnowledge에도 2차 게이트 — 낡은 탭 방어).
+  if(VOLATILE_RE.test(q)){
+    dbg('⏱ 휘발성 질문 — RAG·습득 우회 즉시 답변: "'+q.slice(0,24)+'"');
+    _lastQ=q;  // "아까 날씨 물어본 거" 재링크 대응 — 본격 질문 경로를 안 타므로 여기서 기록
+    await answerVolatile(q,gen);
+    return;
+  }
+  // [2026-10-06 실측 [rwz8]] 진행·재개 명령 게이트 — "실행 계속 발표할까요"는 발표 이어달라는 명령이지
+  // 질문이 아니다. 까요 어미만으로 질문 접수돼 rag-miss → 습득 오염(doc#34) → 정직통보 연쇄로 발표가
+  // 멈췄다. 질문어(뭐/왜/설명/알려…)가 동반되면 진짜 질문이므로 게이트를 통과시킨다.
+  if(RESUME_CMD_RE.test(q)&&!/(뭐|뭔|무엇|왜|어떻|언제|어디|누구|몇|얼마|무슨|어떤|설명|알려|질문|차이|의미|예시|예를|나요|습니까|입니까)/.test(q)){
+    dbg('▶ 진행 명령 — 질문 아님, 발표 재개: "'+q.slice(0,24)+'"');
+    qaLog('resume_cmd',{q:q.slice(0,80)});
+    qa.textContent='';qa.style.display='none';
+    qaState='idle';
+    if(!playing){setStatus('대기');return}  // 재개할 발표 없음(종료 Q&A 등) — 조용히 소비
+    setStatus('▶ 발표 재개');
+    await speakUnified('네, 계속 진행하겠습니다.');
+    if(gen!==_qaGen)return;
+    if(_pendingQ){const _nq=_pendingQ;_pendingQ=null;dbg('🔁 대기 질문 이어받기: "'+_nq.slice(0,24)+'"');handleInterruption(_nq);return}
+    resumeFromInterrupted();
+    return;
+  }
   // [2026-10-05 v9e] 지연 답변 상태 문의 — "아까 물어봤는데 답 찾았어요?"류는 질문 본문이 아니라
   // 상태 확인이다. 실측([681h] +699s): 상태 문의가 rag-miss → 중간 멘트("먼저 발표를 진행하고…")
   // + 상태 문의 텍스트의 지식 습득까지 가서 이중 오염. 질문으로 처리하지 말고 실제 상태로 답한다.
   if(/(아까|방금|조금\s*전|중간에).{0,24}(물어봤|질문했|물었|여쭤봤).{0,28}(찾았|찾으셨|답변|됐|있나|없나)/.test(q)&&!/찾아\s*(설명|드려|줘|봐)/.test(q)){
     const _d=_deferQA;
     dbg('🧭 지연 답변 상태 문의 — status='+(_d?_d.status:'없음'));
-    if(_d&&_d.status==='ready'){offerDeferredAnswer().catch(()=>{});return}
-    if(_d&&(_d.status==='acquiring'||_d.status==='answering')){
+    if(_d&&_d.status==='ready'){
+      // [2026-10-06] ready인 상태 문의는 사용자가 직접 물은 것 — 섹션 경계를 기다리지 않고 즉시
+      // 제안·제공한다(명시적 개입). 기존엔 제안을 풀에만 던져두고 소비자가 없어 동의("네") 후에도
+      // 아무 일도 일어나지 않던 잠재 결함 — 여기서 답변까지 재생하고 발표를 재개한다.
+      const want=await offerDeferredAnswer();
+      if(gen!==_qaGen)return;
+      const dd=_deferQA;
+      if(want&&dd&&dd.answer){
+        _deferQA=null;
+        setStatus('💬 대기 질문 답변 재생');
+        await speakUnified('답변 드리겠습니다.');
+        if(gen!==_qaGen)return;
+        await speakQaAnswer(dd.answer);
+        if(gen!==_qaGen)return;
+        qaLog('deferred_answer',{via:'status_q',waitMs:Date.now()-dd.started,chars:(dd.answer||'').length});
+        qaFlushLog({state:'deferred_answer',q:dd.q,waitMs:Date.now()-dd.started});
+      }
+      // 거절·무응답 — 1차 만료로 되돌아간 'ready'면 유지해 섹션 경계 훅이 다시 제안, 그 외는 폐기
+      _deferQA=(dd&&!want&&dd.status==='ready')?dd:null;
+      document.getElementById('qaBox').style.display='none';
+    }else if(_d&&(_d.status==='acquiring'||_d.status==='answering')){
       await speakUnified('아직 관련 지식을 찾고 있습니다. 찾는 대로 말씀드리겠습니다.');
       if(gen!==_qaGen)return;
     }else{
@@ -1973,7 +2276,7 @@ async function handleInterruption(q,fromClosing){
   _lastQ=q;  // [2026-10-05 v9c] 메타 질문("아까 그 질문") 재링크용 직전 질문 추적
   qa.textContent='💬 질문: '+q;
   setStatus('💬 답변 준비 중…');
-  const stats={errors:[],fillers:1};
+  const stats={errors:[],fillers:1,confirmSuspect:true};  // confirmSuspect: [2026-10-06] 라이브 질문 한정 — 교정 suspect 발음 확인 1회 허용
   stats.purged=purgePrefetchTts();  // [2026-10-05] 발표 프리페치 백로그 폐기 — Q&A 음성 우선
   qaLog('purge_prefetch',{n:stats.purged});
 
@@ -2094,7 +2397,7 @@ function scheduleConfirmTimer(){
 // [2026-10-05 v6] 지연 답변 제안 무응답 타이머 — 애매한 발화로 응답 시간을 연장할 때만 재설정
 function scheduleDeferTimer(){
   clearTimeout(_deferTimer);
-  _deferTimer=setTimeout(()=>{if(qaState==='deferring'){qaState='idle';resolveDeferred(false);dbg('⏱ 답변 제안 무응답 — 다음 진행')}},8000);
+  _deferTimer=setTimeout(deferOfferExpiry,8000);  // [2026-10-06] 공용 만료 — 애매한 발화 연장분도 동일 정책
 }
 // "질문 있으신가요?"/"네, 말씀해 주세요" 후 사용자가 실제 질문을 안 하고 계속 침묵하면
 // 무한정 멈춰있지 않도록 — 일정 시간 후 자동으로 발표를 재개한다. 도중에 아무 말이라도
@@ -2154,29 +2457,37 @@ let _playGen=0;
 async function playSentenceStream(idx){
   const gen=_playGen;  // 이 체인의 세대 캡처
   if(!playing||interrupted)return;
-  // [2026-10-05 v6.1] 지연 답변 일시정지 훅 — 답변이 준비되는 대로 "다음 문장 시작 전"에 잠시
-  // 멈추고 동의를 얻는다(사용자 지정: "에이전트가 답변을 찾으면 발표를 잠시 멈추고 조금 전
-  // 질문하신 OOO에 대하여 답변 드려도 될까요?"). 슬라이드 끝만이 아니라 모든 문장 경계에서 검사 —
-  // ready 전환 즉시 다음 경계(최대 한 문장 뒤)에서 개입한다.
-  if(_deferQA&&_deferQA.status==='ready'&&!interrupted){
-    const want=await offerDeferredAnswer();
-    if(gen!==_playGen||interrupted||!playing)return;  // 제안 중 새 질문/정지 — 체인 폐기
-    if(want){
-      const d=_deferQA;_deferQA=null;
-      if(d&&d.answer){
-        setStatus('💬 대기 질문 답변 재생');
-        await speakUnified('답변 드리겠습니다.');  // "네," 접두 금지(조기 EOS 실측) — 프리캐시 문구
-        if(gen!==_playGen||interrupted||!playing)return;
-        await speakQaAnswer(d.answer);
-        if(gen!==_playGen||interrupted||!playing)return;
-        qaLog('deferred_answer',{waitMs:Date.now()-d.started,chars:(d.answer||'').length});
-        qaFlushLog({state:'deferred_answer',q:d.q,waitMs:Date.now()-d.started});
-      }
-    }
-    document.getElementById('qaBox').style.display='none';
-    if(!playing||interrupted)return;
-  }
   if(idx>=sentences.length){
+    // [2026-10-06 사용자 지정, v6.1 폐지] 지연 답변 섹션 경계 훅 — 제안·답변은 "한 섹션(슬라이드)의
+    // 발표가 끝나고 다음 섹션 전환 전" 타이밍에 한다. → [2026-10-06 사용자 재변경] 한 문장 재생
+    // 완료 직후 개입(아래 재생 꼬리 훅)으로 되돌림 — 슬라이드 경계까지는 텀이 너무 길다는 지적.
+    // 이 슬라이드 끝 분기는 마지막 문장 재생 직후 훅에서 제안 기회를 벌써 얻지만, deferRecheck가
+    // 그 사이(~수백 ms)에 막 ready가 된 경우의 후속 안전망으로 남긴다.
+    if(_deferQA&&_deferQA.status==='ready'&&!(_deferQA.reofferAt&&Date.now()<_deferQA.reofferAt)&&!interrupted){
+      const want=await offerDeferredAnswer();
+      if(gen!==_playGen||interrupted||!playing)return;  // 제안 중 새 질문/정지 — 체인 폐기
+      if(want){
+        const d=_deferQA;_deferQA=null;
+        if(d&&d.answer){
+          setStatus('💬 대기 질문 답변 재생');
+          await speakUnified('답변 드리겠습니다.');  // "네," 접두 금지(조기 EOS 실측) — 프리캐시 문구
+          if(gen!==_playGen||interrupted||!playing)return;
+          await speakQaAnswer(d.answer);
+          if(gen!==_playGen||interrupted||!playing)return;
+          qaLog('deferred_answer',{waitMs:Date.now()-d.started,chars:(d.answer||'').length});
+          qaFlushLog({state:'deferred_answer',q:d.q,waitMs:Date.now()-d.started});
+        }
+      }
+      document.getElementById('qaBox').style.display='none';
+      if(!playing||interrupted)return;
+    }else if(_deferQA&&_deferQA.refused&&!_deferQA.told&&!interrupted){
+      // [2026-10-06 22b8] 습득 실패의 정직 마무리 — 답변처럼 꾸미는 개입이 아니라 상태 통보 한 번.
+      // 프리캐시 문구라 즉시 재생된다.
+      _deferQA.told=true;_deferQA=null;
+      dbg('💬 습득 실패 마무리 — 섹션 경계에서 정직 통보');
+      await speakUnified('관련 지식을 찾지 못했습니다. 죄송합니다.');
+      if(gen!==_playGen||interrupted||!playing)return;
+    }
     if(curSlideIdx<slides.length-1)await presentSlide(curSlideIdx+1);
     else{await startClosingQA()}
     return
@@ -2226,6 +2537,27 @@ async function playSentenceStream(idx){
   else{setStatus('⚠ 문장 '+(idx+1)+' 음성 생성 실패 — 자막으로 확인해 주세요');qaLog('sentence_tts_fail',{idx:idx+1,chars:(sentences[idx]||'').length});dbg('⚠ 문장 '+(idx+1)+' 음성 실패 — 스킵(브라우저 음성 금지)')}  // [2026-10-05] 정책 확장(사용자 지정): 브라우저 폴백 음성 원천 금지 — 이국 억양·중국계 발음이 어디서도 나오지 않게. 자막에 원문이 있으므로 스킵하고 다음 문장으로
   if(interrupted)return;
   if(gen!==_playGen)return;
+  // [2026-10-06 사용자 재변경] 지연 답변 문장 경계 개입 — "섹션 단위로 답변하면 텀이 너무 길어지므로
+  // 한 문장 음성 출력이 완료된 후 지식답변이 준비되면 개입하여 답변하도록". 원래 v6.1의 문장 경계
+  // 개입을 섹션 경계(위 슬라이드 끝 분기)로 옮겼던 것을 되돌린다. 제안→동의→답변 재생 후 다음
+  // 문장으로 자연히 이어진다. refused 정직 통보(습득 실패 안내)는 답변 개입보다 가벼운 상태
+  // 통보라 섹션 경계 유지 — 매 문장 방해하지 않는다.
+  if(_deferQA&&_deferQA.status==='ready'&&(!_deferQA.reofferAt||Date.now()>=_deferQA.reofferAt)){
+    const want=await offerDeferredAnswer();
+    if(gen!==_playGen||interrupted||!playing)return;  // 제안 중 새 질문/정지 — 체인 폐기
+    if(want&&_deferQA&&_deferQA.answer){
+      const d=_deferQA;_deferQA=null;
+      setStatus('💬 대기 질문 답변 재생');
+      await speakUnified('답변 드리겠습니다.');  // "네," 접두 금지(조기 EOS 실측) — 프리캐시 문구
+      if(gen!==_playGen||interrupted||!playing)return;
+      await speakQaAnswer(d.answer);
+      if(gen!==_playGen||interrupted||!playing)return;
+      qaLog('deferred_answer',{via:'sentence_boundary',waitMs:Date.now()-d.started,chars:(d.answer||'').length});
+      qaFlushLog({state:'deferred_answer',q:d.q,waitMs:Date.now()-d.started});
+    }
+    document.getElementById('qaBox').style.display='none';
+    if(!playing||interrupted)return;
+  }
   // ③ 문장 간 자연스러운 쉼 — [2026-10-04 v7] 쉼표로 갈라진 조각 사이는 200ms(짧은 호흡),
   // 문장 끝은 700ms. v6에서 조각 간에도 700ms가 들어가 "문장 중간 무음"이 생겼었다.
   if(idx+1<sentences.length){
@@ -2542,7 +2874,7 @@ slides.forEach((_,i)=>{_scriptChain=_scriptChain.then(()=>ensureScript(i)).catch
 await presentSlide(Math.max(curSlideIdx,0));
 }  // [2026-10-05] pregenPhrases 호출은 발표 '시작' 지점으로 이동 (아래 발표 종료 후 실행이던 호출은 발표 내내 캐시가 빈 원인이었다)
 function pausePresentation(){playing=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('일시정지');if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}  // [2026-10-04 v9] _audioFin 즉시 해제 — 120s 고아 감시자 방지
-function stopAll(){playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);_deferQA=null;_pendingQ=null;_qaGen++;_lastQ='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring')qaState='idle';resolveDeferred(false);setStatus('정지')}  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
+function stopAll(){playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);_deferQA=null;_deferAskedAt=0;_pendingQ=null;_qaGen++;_lastQ='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring')qaState='idle';resolveDeferred(false);setStatus('정지')}  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
 // ── 마지막 슬라이드 발표 완료 → Q&A 시간 → URL 열기 ──
 let _closingTimer=null;
 function extractURL(){
