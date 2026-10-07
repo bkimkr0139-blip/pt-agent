@@ -1403,7 +1403,10 @@ async function acquireKnowledge(userId, q, opts = {}) {
     const dup = db.prepare("SELECT id FROM documents WHERE user_id=? AND origin='auto' AND name=?").get(userId, name);
     if (dup) return { ok: false, reason: 'duplicate', docId: dup.id };
     // 1) 클라우드 답변 — proxyToN8n과 같은 게이트웨이·모델 시험 주입 규칙을 그대로 쓴다.
-    const ctx = '당신은 발표 질의응답용 지식 사전을 편찬하고 있습니다. 다음 질문에 대해 객관적 사실만 한국어로 2~4문장으로 정리하세요. 수치·고유명사·날짜는 확실한 것만 쓰고, 확신이 없으면 답변 맨 앞에 [불확실]이라고 표기하세요.'
+    // [2026-10-07 v10.1] 두문자어 변별 강화 — 실측([a7v9]): "oci가 뭐의 약자야"가 환각 확장
+    // ("Oxygen Chemical Industries")으로 습득돼 사실로 재생될 뻔했다. IT·클라우드 발표 맥락에서는
+    // 널리 쓰이는 기술 용어 의미를 우선하고, 확정 근거가 없으면 추측 대신 [불확실]을 요구한다.
+    const ctx = '당신은 발표 질의응답용 지식 사전을 편찬하고 있습니다. 다음 질문에 대해 객관적 사실만 한국어로 2~4문장으로 정리하세요. 수치·고유명사·날짜는 확실한 것만 쓰고, 확신이 없으면 답변 맨 앞에 [불확실]이라고 표기하세요. 두문자어·약자(OCI, RAG 등)를 물으면 IT·클라우드·데이터 분야에서 가장 널리 쓰이는 의미를 우선 설명하고, 그렇게 확정할 근거가 없으면 추측하지 말고 [불확실]을 표기하세요.'
       + (opts.context ? '\n[질문 배경] ' + String(opts.context).slice(0, 120) : '') + '\n[질문] ' + q;
     const body = { messages: [{ role: 'user', content: ctx }], key: N8N_KEY };
     const t = meval.trial();
@@ -1466,6 +1469,17 @@ app.post(`${PREFIX}/api/knowledge/acquire`, requireApiAuth, (req, res) => {
   res.json({ accepted: true, dedup: false });
   acquireKnowledge(req.user.id, q, { context: (req.body && req.body.context) || '', userName: req.user.username, source: 'auto' })
     .catch(() => {});
+});
+// [2026-10-07 v10.1] 습득 완료 표식 — deferRecheck·상태 문의 회수가 "이 질문 전용 지식이 습득됐는지"
+// 를 유사도 요동 없이 확인한다(실측: 동일 질의가 doc#40 0.395 ↔ doc#41 <0.273로 요동 — 검색 점수만
+// 믿으면 습득 돼 있어도 영영 회수 실패). 정규화 질문명의 auto 문서 청크 텍스트를 돌려준다.
+app.get(`${PREFIX}/api/knowledge/acquired`, requireApiAuth, (req, res) => {
+  const nq = normQ(String(req.query.q || ''));
+  if (!nq) return res.json({ acquired: false });
+  const row = db.prepare("SELECT id,confidence FROM documents WHERE user_id=? AND origin='auto' AND name=?").get(req.user.id, '자동학습: ' + nq);
+  if (!row) return res.json({ acquired: false });
+  const ch = db.prepare('SELECT text FROM chunks WHERE document_id=? LIMIT 1').get(row.id);
+  res.json({ acquired: true, docId: row.id, confidence: row.confidence, text: ch ? ch.text : '' });
 });
 // 관리자 콘솔 백로그 "지금 습득" — 폼 POST라 동기 완료 후 결과 메시지와 함께 렌더.
 app.post(`${PREFIX}/admin/knowledge/acquire`, requireAdmin, async (req, res) => {
