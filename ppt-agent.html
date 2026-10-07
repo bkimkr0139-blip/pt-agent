@@ -1813,6 +1813,20 @@ function isRefusalAnswer(a){
   return /답변드릴수없|답변할수없|답변드리기어렵|말씀드리기어렵|찾지못했|정보가없|자료가없|근거가없|없는내용|정보를찾을수없|자료를찾을수없|문서를찾을수없|관련내용을찾을수없/.test(first);
 }
 
+// [2026-10-07 사용자 지시] 파라메트릭 직답 — 참조 0건을 "지식 없음" 거절로 보내는 건 오버다.
+// 로컬 LLM도 파라미터에 일반 상식이 있으니, 할루시네이션 방지 게이트(센티널+거절 판정)를 유지한 채
+// 일반 지식 질문은 로컬 LLM이 곧바로 답한다. 사내·발표자료 고유 사실로 보이는 질문만 기존
+// rag-miss(습득) 경로로 보낸다. LLM이 모르면 센티널이 RAG_MISS_MSG로 되돌려 습득 흐름은 유지.
+const INTERNAL_SCOPE_RE=/(우리|저희|사내|내부|임직원|연봉|조직|고객사|수행\s?실적|실적|매출|계약|일정|인원)/;
+function parametricAnswerable(q){
+  if(INTERNAL_SCOPE_RE.test(q))return false;  // 사내 고유 사실 가능성 — LLM 파라미터에 없는 영역, 습득 경로 담당
+  return true;
+}
+// [2026-10-07 사용자 지시] 최신성 질문 — 로컬 LLM 학습 컷 이후 정보 가능성 → 클라우드 LLM 우선.
+// 주의: "최신/실시간" 단독은 휘발성 게이트(VOLATILE_RE)에 넣지 않기로 한 실측 교훈과 구분 —
+// 이건 엔진 선택이지 접수 게이트가 아니므로 안전. 실패 시 기존 로컬 폴백이 그대로 받는다.
+const LATEST_RE=/(최신|최근|요즘|요새|트렌드|뉴스|화제|올해|이번\s?해|작년|내년|언제\s?(나왔|나온|출시|발표|릴리즈)|가장\s?최근)/;
+
 async function generateAnswer(q,ragPromise,stats){
   const s=slides[curSlideIdx];
   // [2026-10-05 v2] 센티널 강제 — 실측(발표 [b0tm] 후속): "답하거나 ~로 마무리"식 이중 지시는
@@ -1857,12 +1871,23 @@ async function generateAnswer(q,ragPromise,stats){
     // LLM을 아예 돌리지 않고 한계를 밝힌다(사용자 지시). 참조가 '있어도' 무관한 청크일 수 있어서
     // (점수 분리 불가 실측) 그 판정은 위 센티널 지시로 LLM에 맡기고, 토큰이 나오면 아래에서 교체.
     if(!_hasRefs){
-      if(stats){stats.ragMiss=true;stats.engine='rag-miss'}
-      return RAG_MISS_MSG;
+      // [2026-10-07 사용자 지시] refs 0 = 거절이 아니라 파라메트릭 직답 기회 — 일반 지식 질문은
+      // 로컬 LLM이 바로 답하고, 사내 고유 사실만 습득 경로로 보낸다. 파라메트릭에서 모르면 아래
+      // 센티널 판정이 RAG_MISS_MSG로 되돌려 습득 흐름이 그대로 이어진다(안전망 이중).
+      if(parametricAnswerable(q)){
+        if(stats)stats.parametric=true;
+        ctx='당신은 발표 중이며 청중의 일반 지식 질문에 답합니다. 참고 자료가 없으니 당신이 학습한 일반 지식 범위에서만 간결하게 답하세요(2~3문장). 규칙: 널리 알려진 확실한 사실만 답하고, 수치·날짜·버전은 확실할 때만 말하며, 이 발표·회사 내부 사실(인원·실적·일정·계약)은 절대 지어내지 말고, 확신이 없으면 다른 말 없이 정확히 '+NO_ANSWER_TOKEN+' 토큰만 출력하세요.\n[슬라이드] '+(s?s.title:'')+'\n[질문] '+q;
+      }else{
+        if(stats){stats.ragMiss=true;stats.engine='rag-miss'}
+        return RAG_MISS_MSG;
+      }
     }
   }
   let ans='',engine='';
-  if(scriptEngine==='openai'){
+  // [2026-10-07 사용자 지시] 최신성 질문은 클라우드 LLM 우선(로컬 학습 컷 한계) — 실패 시 기존 로컬 폴백.
+  const wantsLatest=LATEST_RE.test(q);
+  if(stats&&wantsLatest)stats.latestRouted=true;
+  if(scriptEngine==='openai'||wantsLatest){
     const _t0=Date.now();
     try{const r=await fetch(OPENAI_SCRIPT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));ans=(j.content||'').trim();if(ans)engine='openai-script'}catch(e){if(stats)stats.errors.push('script:'+((e&&e.message)||'').slice(0,40))}
     if(stats)stats.scriptMs=Date.now()-_t0;
@@ -2008,14 +2033,14 @@ function offerTextAll(d){
 // [2026-10-06 42wp] 준비된 지연 답변(첫 항목+대기열)을 '답변 드리겠습니다.' 이후 순차 재생하고
 // 건별 qa 기록. alive()가 거짓(새 질문·정지)이 되면 미전달 항목을 대기열에 되돌려 다음 경계에서
 // 다시 제안된다. via/extra는 진단용 qa 필드.
-async function speakDeferredAnswers(first,alive,via,extra){
+async function speakDeferredAnswers(first,alive,via,extra,announced){
   const items=[first,..._deferPending].filter(x=>x&&x.answer);
   _deferPending=[];
   let n=0;
   for(let i=0;i<items.length;i++){
     if(!alive()){_deferPending=items.slice(i).concat(_deferPending);return n}
     const it=items[i];
-    await speakQaAnswer(it.answer);
+    await speakQaAnswer(it.answer,{announced:!!announced});  // [2026-10-07] 호출부가 이미 안내 멘트를 말했다면 브리지는 중립으로
     n++;
     qaLog('deferred_answer',Object.assign({via:via||'defer',waitMs:Date.now()-it.started,chars:(it.answer||'').length},extra||{}));
     qaFlushLog(Object.assign({state:'deferred_answer',q:it.q,waitMs:Date.now()-it.started},extra||{}));
@@ -2112,7 +2137,7 @@ async function deliverDeferredNow(){
   setStatus('💬 대기 질문 답변 재생');
   await speakUnified('답변 드리겠습니다.');
   if(g!==_qaGen||!playing)return;
-  await speakDeferredAnswers(d,()=>g===_qaGen&&playing,'late_yes',{late:true});
+  await speakDeferredAnswers(d,()=>g===_qaGen&&playing,'late_yes',{late:true},true);
   if(g!==_qaGen||!playing)return;
   resumeFromInterrupted();
 }
@@ -2199,7 +2224,8 @@ async function answerVolatile(q,gen){
 // 문장 단위 생성인 발표 본문은 항상 깨끗했다 → mlx CustomVoice 모델의 장문 드리프트.
 // 답변도 발표 본문과 동일한 scriptToSentences 문장 분할 경로로: 첫 문장은 큐 선두+대기 예산,
 // 이후 문장은 앞 문장 재생 중 병렬 생성해 이어서 재생.
-async function speakQaAnswer(text){
+async function speakQaAnswer(text,opts){
+  // opts.announced: 호출부가 직전에 "답변 드리겠습니다"를 이미 말했음 — 브리지가 재차 안내하지 않게(아래)
   const _t0=Date.now();
   unduckVol();  // [2026-10-06 사용자 지정] 답변 재생 시작 — 원래 볼륨으로 회복
   const parts=scriptToSentences(text).map(p=>p.t);
@@ -2220,7 +2246,9 @@ async function speakQaAnswer(text){
   if(!first){
     bridge=true;
     dbg('⏳ 답변 첫 문장 지연 — 브리지 멘트로 침묵 메움');
-    await speakUnified('바로 답변 드릴게요.').catch(()=>{});
+    // [2026-10-07 사용자 지적] 직전에 "답변 드리겠습니다"를 이미 말한 경로(지연 제안 동의·상태 문의·
+    // 대기열 전달)에선 재차 "바로 답변 드릴게요"가 이중 발화 — 중립 멘트로 침묵만 메운다.
+    await speakUnified(opts&&opts.announced?'잠시만요.':'바로 답변 드릴게요.').catch(()=>{});
     first=await Promise.race([enqueueTts(parts[0],true,'qa',true).catch(()=>null),
       new Promise(r=>setTimeout(()=>r(null),ANSWER_TTS_WAIT_MS))]);
   }
@@ -2316,7 +2344,7 @@ async function handleInterruption(q,fromClosing){
         setStatus('💬 대기 질문 답변 재생');
         await speakUnified('답변 드리겠습니다.');
         if(gen!==_qaGen)return;
-        await speakDeferredAnswers(dd,()=>gen===_qaGen,'status_q');
+        await speakDeferredAnswers(dd,()=>gen===_qaGen,'status_q',null,true);
         if(gen!==_qaGen)return;
       }
       // 거절·무응답 — 1차 만료로 되돌아간 'ready'면 유지해 섹션 경계 훅이 다시 제안, 그 외는 폐기
@@ -2391,10 +2419,10 @@ async function handleInterruption(q,fromClosing){
   stats.answerTtsMs=Date.now()-_at0;
   hideSearchIndicator();  // 표시기 잔존 방어 — 어떤 경로로 켜졌든 확인 멘트 전엔 닫혀 있어야 한다
 
-  qaFlushLog({state:'answer',q:String(q).slice(0,300),ragMs:stats.ragMs??null,scriptMs:stats.scriptMs??null,llmMs:stats.llmMs??null,engine:stats.engine||null,ragRefs:stats.ragRefs??null,ragTimeout:!!stats.ragTimeout,fillers:stats.fillers,answerChars:stats.answerChars??answer.length,answerTtsMs:stats.answerTtsMs??null,textFallback:!stats.engine&&!stats.ragMs&&!stats.llmMs?false:undefined,errors:stats.errors});
+  qaFlushLog({state:'answer',q:String(q).slice(0,300),ragMs:stats.ragMs??null,scriptMs:stats.scriptMs??null,llmMs:stats.llmMs??null,engine:stats.engine||null,ragRefs:stats.ragRefs??null,ragTimeout:!!stats.ragTimeout,fillers:stats.fillers,answerChars:stats.answerChars??answer.length,answerTtsMs:stats.answerTtsMs??null,parametric:!!stats.parametric,latest:!!stats.latestRouted,textFallback:!stats.engine&&!stats.ragMs&&!stats.llmMs?false:undefined,errors:stats.errors});
   // [2026-10-05] Jev QA Router 섀도 관찰 — 기존 QA가 "다 끝난 뒤" 결과만 비동기 보고(지시서 §35).
   // await 없이 fire-and-forget, 실패 무시: 이 보고가 사용자 QA 결과에 개입할 경로가 구조적으로 없다.
-  try{fetch('/ppt-agent/api/decision/observe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:String(q).slice(0,300),slideTitle:(slides[curSlideIdx]||{}).title||null,sessionMode:fromClosing?'closing_qa':'interrupt',rag:{count:stats.ragRefs??0,topScore:stats.ragTop??null,autoTop:!!stats.ragAuto},actual:{engine:stats.engine||null,ragMiss:!!stats.ragMiss,llmCalled:stats.engine==='openai-script'||stats.engine==='local',responseMs:stats.scriptMs??null,ttsMs:stats.answerTtsMs??null}})}).catch(()=>{})}catch(e){}
+  try{fetch('/ppt-agent/api/decision/observe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:String(q).slice(0,300),slideTitle:(slides[curSlideIdx]||{}).title||null,sessionMode:fromClosing?'closing_qa':'interrupt',rag:{count:stats.ragRefs??0,topScore:stats.ragTop??null,autoTop:!!stats.ragAuto},actual:{engine:stats.engine||null,ragMiss:!!stats.ragMiss,llmCalled:stats.engine==='openai-script'||stats.engine==='local-llm',responseMs:stats.scriptMs??null,ttsMs:stats.answerTtsMs??null}})}).catch(()=>{})}catch(e){}
 
   // [2026-10-05] 답변하지 못한 질문 폐루프 — 자료 미스(ragMiss)든 답변 음성 시간 초과든,
   // "제대로 음성으로 답변하지 못한 질문"을 관리자 요청으로 적재한다. 서버가 state='rag_miss'를
@@ -2549,7 +2577,7 @@ async function playSentenceStream(idx){
           setStatus('💬 대기 질문 답변 재생');
           await speakUnified('답변 드리겠습니다.');  // "네," 접두 금지(조기 EOS 실측) — 프리캐시 문구
           if(gen!==_playGen||interrupted||!playing)return;
-          await speakDeferredAnswers(d,()=>gen===_playGen&&!interrupted&&playing,'section_boundary');
+          await speakDeferredAnswers(d,()=>gen===_playGen&&!interrupted&&playing,'section_boundary',null,true);
           if(gen!==_playGen||interrupted||!playing)return;
         }
       }
@@ -2626,7 +2654,7 @@ async function playSentenceStream(idx){
       setStatus('💬 대기 질문 답변 재생');
       await speakUnified('답변 드리겠습니다.');  // "네," 접두 금지(조기 EOS 실측) — 프리캐시 문구
       if(gen!==_playGen||interrupted||!playing)return;
-      await speakDeferredAnswers(d,()=>gen===_playGen&&!interrupted&&playing,'sentence_boundary');
+      await speakDeferredAnswers(d,()=>gen===_playGen&&!interrupted&&playing,'sentence_boundary',null,true);
       if(gen!==_playGen||interrupted||!playing)return;
     }
     document.getElementById('qaBox').style.display='none';
