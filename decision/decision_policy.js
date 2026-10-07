@@ -16,6 +16,7 @@ const DEFAULTS = {
   provider: 'rule',          // rule | jev | llm_judge — §30 Provider 추상화
   canary_pct: 0,             // canary 모드에서 라우팅을 적용할 QA 비율(0~100)
   jev: { url: null, timeout_ms: 300 },  // §34 Jev 예산 300ms, 미설정 시 Rule로 폴백
+  jev_shadow: false,         // 섀도 대조용 Jev 병행(클라우드 비용·rate limit — 기본 끔)
   llm_judge_shadow: false,   // 섀도 비교용 LLMJudge 병행(클라우드 비용 — 기본 끔)
   answer_high: 0.85,
   answer_mid: 0.65,

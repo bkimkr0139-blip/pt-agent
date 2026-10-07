@@ -69,7 +69,11 @@ function ruleDecide(input) {
 // ── 설정형 슬롯: JevDecisionProvider (§30) — policy.jev.url에 실제 엔드포인트가 설정됐을 때만 활성.
 async function jevDecide(input, cfg) {
   const t0 = Date.now();
-  if (!cfg || !cfg.url) return { ok: false, reason: 'jev-not-configured' };
+  if (!cfg) return { ok: false, reason: 'jev-not-configured' };
+  // kind:'typesafe' — 상용 TypeSafe(Jev)를 in-process 어댑터로 호출(HTTP 홉 없음, 같은 §5 스키마).
+  // 지연 require: typesafe_client.js가 이 모듈의 detectPII를 쓰므로 순환 require 회피.
+  if (cfg.kind === 'typesafe') return require('./typesafe_client').typesafeDecide(input, cfg);
+  if (!cfg.url) return { ok: false, reason: 'jev-not-configured' };
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), cfg.timeout_ms || 300); // §34 300ms 예산
   try {

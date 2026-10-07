@@ -43,6 +43,12 @@ async function decideQA(input) {
     outcome: input.outcome || null, // 라이브 이후 옵티마이저가 채우는 결과(재질문·중단 등)
     security: { fields_sent: null, pii_detected: pii },
   };
+  // 섀도 대조(§35): 1차 판단체가 즉답하는 동안 설정된 Jev를 백그라운드로 병렬 평가해 별도
+  // 레코드로 기록 — 활성 경로 개입 0, 정확도·지연·토큰 실측 전용. 키/URL 없으면 무시.
+  const jevCfg = policy.jev_shadow && policy.provider === 'rule' && policy.jev &&
+    (policy.jev.kind === 'typesafe' ? !!(process.env.TYPESAFE_API_KEY || process.env.TYPESAFE_KEY) : policy.jev.url)
+    ? policy.jev : null;
+  if (jevCfg) jevShadow(input, jevCfg, id, rec);
   // 1) 판단체 실행 — 기본 Rule(로컬, 즉답). 실패해도 항상 existing 폴백(§33).
   let d = null;
   try {
@@ -78,6 +84,32 @@ async function decideQA(input) {
   return { engaged: !!(engaged && !rec.execution.fallback && rec.threshold && rec.threshold.exec !== 'existing'), id, decision: rec.decision, threshold: rec.threshold, plan: rec.threshold && rec.threshold.exec !== 'existing' ? planFor(rec.threshold, d) : null, mode: policy.mode };
 }
 
+// 섀도 대조 레코드 — jev 결과를 shadow_of 참조로 별도 기록. 실패해도 본 경로에 영향 없음(§35).
+function jevShadow(input, cfg, shadowOf, mainRec) {
+  PROVIDERS.jev(input, cfg).then(r => {
+    appendLog({
+      ts: new Date().toISOString(), id: shadowOf + 's', shadow_of: shadowOf,
+      mode: 'shadow', provider: 'jev-shadow', model: r.ok ? r.decision.model : null,
+      q: mainRec.q, q_len: mainRec.q_len, session_mode: mainRec.session_mode, slide: mainRec.slide,
+      rag: mainRec.rag,
+      decision: r.ok ? {
+        route: r.decision.route, answerability: r.decision.answerability, rag_sufficiency: r.decision.rag_sufficiency,
+        requires_llm: !!r.decision.requires_llm, should_acquire_knowledge: !!r.decision.should_acquire_knowledge,
+        confidence: r.decision.confidence, reason_code: r.decision.reason_code,
+        probabilities: r.decision.probabilities || null, usage: r.decision.usage || null,
+      } : null,
+      threshold: null,
+      execution: {
+        fallback: !r.ok, provider_error: r.ok ? null : r.reason,
+        response_ms: r.ok ? r.decision.response_ms : (r.response_ms || null),
+        llm_called: null, plan_type: null,
+      },
+      actual: mainRec.actual,
+      security: { fields_sent: r.ok ? r.decision.fields_sent : null, pii_detected: mainRec.security.pii_detected },
+    });
+  }).catch(() => { /* 섀도 실패는 무시 — 발표 흐름이 최우선(§35) */ });
+}
+
 // 관리자 탭/상태용 지표 — 로그 꼬리 N건에서 산출(§12 KPI: LLM 회피율·오거절·오수용·지연).
 function computeMetrics(tailN) {
   let lines = [];
@@ -86,11 +118,14 @@ function computeMetrics(tailN) {
     lines = all ? all.split('\n').slice(-(tailN || 500)) : [];
   } catch { return { total: 0 }; }
   const recs = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-  const n = recs.length;
-  if (!n) return { total: 0 };
+  // 섀도 대조 레코드(provider:'jev-shadow')는 KPI 분모에서 제외 — 본 판단체 지표 오염 방지.
+  const shadowN = recs.filter(r => r.provider === 'jev-shadow').length;
+  const main = shadowN ? recs.filter(r => r.provider !== 'jev-shadow') : recs;
+  const n = main.length;
+  if (!n) return { total: 0, shadow_count: shadowN };
   const routes = {}; let avoid = 0, fReject = 0, fAccept = 0, fb = 0, actualN = 0;
   const lats = [];
-  for (const r of recs) {
+  for (const r of main) {
     const rt = (r.threshold && r.threshold.route) || (r.decision && r.decision.route) || '?';
     routes[rt] = (routes[rt] || 0) + 1;
     if (r.decision && !r.decision.requires_llm) avoid++;
@@ -107,7 +142,7 @@ function computeMetrics(tailN) {
   const lat = lats.sort((a, b) => a - b);
   const pct = p => lat.length ? Math.round(lat[Math.min(lat.length - 1, Math.floor(lat.length * p))]) : null;
   return {
-    total: n, routes, fallback: fb,
+    total: n, shadow_count: shadowN, routes, fallback: fb,
     llm_avoidance: Math.round(100 * avoid / n),
     false_reject: actualN ? +(100 * fReject / actualN).toFixed(1) : null,
     false_accept: actualN ? +(100 * fAccept / actualN).toFixed(1) : null,
