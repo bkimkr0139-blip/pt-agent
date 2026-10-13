@@ -2046,44 +2046,60 @@ function groundedIn(ans,evidence){
 function buildAnswerCtx(q,s,refs){
   let c='당신은 발표 중입니다. 청중이 질문했습니다. 아래 우선순위를 정확히 따라 2~3문장으로 간결하게 답하세요. 말투는 항상 차분하고 친절한 존댓말로, 한 문장은 짧게 끝내고 감탄사·느낌표 없이 감정을 과장하지 마세요.\n'
    +'1순위: [참고 자료]·[슬라이드]·[발표 중 문장]에 근거가 있으면 그 내용만으로 답하고, 자료에 없는 수치·날짜·고유명사는 덧붙이지 마세요. 자료 기반 답변에는 출처·파일명을 언급하지 마세요(자료는 내장 지식입니다). 답 맨 끝에 [근거:자료N](N=참고 자료 번호) 또는 [근거:슬라이드]를 붙이세요.\n'
-   +'2순위: 자료에 근거가 없어도 널리 알려진 일반 상식·공개 지식을 확실히 알면 답하고 맨 끝에 [근거:일반]을 붙이세요. 이 발표·회사 내부 사실(인원·실적·일정·계약)과 최신 뉴스·시세·날씨·출시일·통계 같은 시의성 정보는 일반 지식으로 답하지 마세요.\n'
+   +'2순위: 자료에 근거가 없어도 널리 알려진 일반 상식·공개 지식(용어 정의 등)을 확실히 알면 답하고 맨 끝에 [근거:일반]을 붙이세요. 자료와 일반 상식을 함께 쓰면 [근거:자료N,일반]을 붙이고, 일반 상식 문장에는 이 발표·회사의 사실을 섞지 마세요. 이 발표·회사 내부 사실(인원·실적·일정·계약)과 최신 뉴스·시세·날씨·출시일·통계 같은 시의성 정보는 일반 지식으로 답하지 마세요.\n'
    +'3순위: 근거와 출처가 명확하지 않거나 조금이라도 확신이 없으면 추측하지 말고 다른 말 없이 정확히 '+NO_ANSWER_TOKEN+' 토큰만 출력하세요.\n'
    +'[슬라이드] '+(s?s.title:'')+'\n[발표 중 문장] '+(sentences[curSentenceIdx]||'')+'\n[질문] '+q;
   if(refs&&refs.length)c+='\n[참고 자료]\n'+refs.map((r,i)=>(i+1)+'. '+(r.origin==='auto'?'(자동 학습·검증 전) ':'')+r.text.slice(0,800)).join('\n');
   return c;
 }
-// 반환 {ok,source('doc'|'auto'|'slide'|'general'),prefix,text,why}
+// 반환 {ok,source('doc'|'auto'|'slide'|'general'|'mixed'),prefix,text,why}
+// [2026-10-13 문장 단위 검증] "IoT가 뭐예요" 실측([qa_log 06:01]): LLM이 "IoT는 사물인터넷을 의미하며…(일반 정의) + 서울시는
+// IoT 인프라를 활용해…(자료)"를 한 답에 섞어 [근거:자료]로 달았고, 답 전체의 어휘 겹침이 0.22라 통째로 거절됐다. 정의 질문엔
+// 자료에 없는 일반 정의가 정답의 일부다. 이제 문장마다 판정한다 — ①자료·슬라이드에 실존(겹침·토큰)하면 자료 문장 ②아니면
+// 일반 상식 조건(내부사실 질문 아님·시의성 아님·질문에 없던 숫자 없음·문장에 내부 어휘 없음)을 만족할 때만 일반 문장 ③그 외는
+// 폐기. 남는 문장이 없으면 거절. 지어낸 사실 주장은 숫자·내부어휘·시의성 게이트와 자료 겹침으로 계속 걸러진다.
+function _splitAnsSentences(t){return String(t||'').split(/(?<=[.!?])\s+|(?<=[다요죠])\s+(?=[가-힣A-Z0-9])/).map(x=>x.trim()).filter(Boolean)}
+function _generalSentenceOk(q,sent){
+  if(!parametricAnswerable(q)||LATEST_RE.test(q)||VOLATILE_RE.test(q))return false;
+  if(INTERNAL_SCOPE_RE.test(sent))return false;
+  if(!GENERAL_ALLOW_NEW_NUMBERS){const qN=_evNorm(q);for(const t of (_evNorm(sent).match(/\d+(?:\.\d+)?/g)||[]))if(!_hasTok(qN,t))return false}
+  return true;
+}
 function verifyAnswer(q,raw,refs,s){
   const tagM=[...String(raw).matchAll(/\[\s*근거\s*[:：]\s*([^\]]*)\]/g)];
   const tag=tagM.length?tagM[tagM.length-1][1]:'';
   const text=String(raw).replace(/\[\s*근거\s*[:：][^\]]*\]/g,'').replace(/\s+/g,' ').trim();
   if(!text)return{ok:false,why:'빈 답변'};
   const slideEv=(s?s.title:'')+' '+(sentences[curSentenceIdx]||'');
-  const refEv=(refs||[]).map(r=>r.text).join(' ');
-  const isGeneral=/일반/.test(tag);
-  if(isGeneral){
-    // 일반 상식 — 내부 사실·시의성 질문은 검증 불가이므로 거절, 신규 숫자 차단
-    if(!parametricAnswerable(q))return{ok:false,why:'일반상식 불가: 내부사실 질문'};
-    if(LATEST_RE.test(q)||VOLATILE_RE.test(q))return{ok:false,why:'일반상식 불가: 시의성 질문'};
-    if(!GENERAL_ALLOW_NEW_NUMBERS){
-      const qN=_evNorm(q);
-      for(const t of (_evNorm(text).match(/\d+(?:\.\d+)?/g)||[]))if(!_hasTok(qN,t))return{ok:false,why:'일반상식 신규숫자:'+t};
-    }
-    return{ok:true,source:'general',text,prefix:'일반적인 상식으로 말씀드리면, '};
-  }
-  // 자료 근거 — 태그가 가리킨 참고 자료(없으면 전체)+슬라이드를 근거 본문으로 재대조
+  const hasGeneralTag=/일반/.test(tag),hasDocTag=/자료|슬라이드/.test(tag);
+  if(/자료/.test(tag)&&/\d/.test(tag)){const nums0=(tag.match(/\d+/g)||[]).map(Number);if(!nums0.some(n=>n>=1&&n<=(refs||[]).length)&&!hasGeneralTag)return{ok:false,why:'존재하지 않는 자료 번호'}}
   const nums=(tag.match(/\d+/g)||[]).map(Number).filter(n=>n>=1&&n<=(refs||[]).length);
-  if(/자료/.test(tag)&&/\d/.test(tag)&&!nums.length)return{ok:false,why:'존재하지 않는 자료 번호'};
-  const picked=nums.length?nums.map(n=>refs[n-1]):(refs||[]);
-  const onlySlide=/슬라이드/.test(tag)&&!/자료/.test(tag);
+  const picked=(nums.length&&!hasGeneralTag)?nums.map(n=>refs[n-1]):(refs||[]);
+  const onlySlide=/슬라이드/.test(tag)&&!/자료/.test(tag)&&!hasGeneralTag;
   const evidence=(onlySlide?'':picked.map(r=>r.text).join(' ')+' ')+slideEv;
-  if(!tag&&!refEv&&!slideEv.trim())return{ok:false,why:'태그·근거 없음'};
-  const g=groundedIn(text,evidence);
-  if(!g.ok)return{ok:false,why:g.why};
-  if(onlySlide||(!picked.length))return{ok:true,source:'slide',text,prefix:''};
+  if(!tag&&!(refs&&refs.length)&&!slideEv.trim()&&!_generalSentenceOk(q,text))return{ok:false,why:'태그·근거 없음'};
+  const sents=_splitAnsSentences(text);
+  // 일반 문장 허용 조건 — LLM이 일반 상식 사용을 선언했거나, 용어 정의 질문이거나, 검색된 자료가 없을 때만. 자료만 근거로 선언한 답의
+  // 자료 밖 문장(예: 결론을 덧붙인 "따라서 …")은 일반 상식으로 위장시키지 않고 폐기한다.
+  const allowGen=hasGeneralTag||!(refs&&refs.length)||/(뭐예요|뭔가요|무엇|뜻|의미|약자|이란|란\s*뭐|설명해)/.test(q);
+  const kept=[];let nDoc=0,nGen=0,firstGenIdx=-1;const dropped=[];
+  for(const st of sents){
+    const g=groundedIn(st,evidence);
+    if(g.ok&&!(hasGeneralTag&&!hasDocTag&&!(refs&&refs.length))){kept.push({t:st,k:'doc'});nDoc++;continue}
+    if(allowGen&&_generalSentenceOk(q,st)){if(firstGenIdx<0)firstGenIdx=kept.length;kept.push({t:st,k:'gen'});nGen++;continue}
+    dropped.push(st.slice(0,24)+'('+(g.why||'일반불가')+')');
+  }
+  if(!kept.length)return{ok:false,why:dropped[0]||'근거 있는 문장 없음'};
+  // 핵심 문장(첫 문장)이 폐기되면 답이 질문과 어긋날 수 있다 — 첫 문장이 폐기됐고 남은 게 부수 문장뿐이면 거절
+  if(sents.length&&dropped.length&&dropped[0].startsWith(sents[0].slice(0,24))&&kept.length<=1&&sents.length>=3)return{ok:false,why:'핵심 문장 폐기:'+dropped[0]};
+  const out=kept.map((x,i)=>(i===firstGenIdx?'일반적인 상식으로 말씀드리면, ':'')+x.t).join(' ');
   const top=picked[0];
-  if(top.origin==='auto')return{ok:true,source:'auto',text,prefix:'클라우드 AI로 보강한 참고 정보(검증 전) 기준으로 말씀드리면, '};
-  return{ok:true,source:'doc',text,prefix:''};  // [2026-10-13] 첨부 문서 내용은 내장 지식 — 출처 언급 없음
+  let source=nGen&&nDoc?'mixed':(nGen?'general':'doc');
+  if(!nGen&&nDoc){
+    if(onlySlide||!picked.length)source='slide';
+    else if(top&&top.origin==='auto')return{ok:true,source:'auto',text:out,prefix:'클라우드 AI로 보강한 참고 정보(검증 전) 기준으로 말씀드리면, ',dropped};
+  }
+  return{ok:true,source,text:out,prefix:'',dropped};
 }
 
 async function generateAnswer(q,ragPromise,stats){
