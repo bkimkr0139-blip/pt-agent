@@ -338,7 +338,7 @@ function overviewPanel() {
     let rows = [];
     try { rows = db.prepare("SELECT username, created_at FROM users WHERE status='pending' ORDER BY created_at LIMIT 10").all(); } catch { /*  */ }
     return rows.map(u => `<tr><td>${esc(u.username)}</td><td>${esc((u.created_at || '').slice(0, 10))}</td>
-<td><form class="inline" method="post" action="${PREFIX}/admin/approve"><input type="hidden" name="username" value="${esc(u.username)}"><button class="actBtn" type="submit">승인</button></form>
+<td><form class="inline" method="post" action="${PREFIX}/admin/approve"><input type="hidden" name="username" value="${esc(u.username)}"><input type="hidden" name="openaiChoice" value="1"><button class="actBtn" type="submit" title="로컬 LLM 전용으로 승인 (OpenAI 허용은 사용자 탭에서)">승인</button></form>
 <form class="inline" method="post" action="${PREFIX}/admin/reject" onsubmit="return confirm('${esc(u.username)} 신청을 삭제할까요?')"><input type="hidden" name="username" value="${esc(u.username)}"><button class="actBtn" type="submit" style="background:#8a3030">삭제</button></form></td></tr>`).join('')
       || '<tr><td colspan="3" style="color:#888">승인 대기 없음</td></tr>';
   })();
@@ -825,7 +825,7 @@ function adminPage(notice, activeTab = 'dash', opts = {}) {
 <td>${usage.queryCount7d}</td>
 <td>${usage.lastActive ? esc(usage.lastActive.slice(0, 16).replace('T', ' ')) : '-'}</td>
 <td>
-${u.status === 'pending' ? `<form class="inline" method="post" action="${PREFIX}/admin/approve"><input type="hidden" name="username" value="${esc(u.username)}"><input type="hidden" name="openaiChoice" value="1"><label style="font-size:.68rem;color:#9a9ea8;display:inline-flex;align-items:center;gap:3px;margin-right:4px;cursor:pointer" title="체크 해제 시 이 계정은 클라우드(OpenAI) TTS를 쓸 수 없고 로컬 엔진만 사용합니다"><input type="checkbox" name="allowOpenai" value="1" checked style="vertical-align:middle">OpenAI</label><button class="actBtn" type="submit">승인</button></form>` : ''}
+${u.status === 'pending' ? `<form class="inline" method="post" action="${PREFIX}/admin/approve"><input type="hidden" name="username" value="${esc(u.username)}"><input type="hidden" name="openaiChoice" value="1"><label style="font-size:.68rem;color:#9a9ea8;display:inline-flex;align-items:center;gap:3px;margin-right:4px;cursor:pointer" title="기본: 해제(로컬 LLM·로컬 TTS 전용). 체크하면 이 계정은 클라우드(OpenAI) LLM·TTS도 사용할 수 있습니다"><input type="checkbox" name="allowOpenai" value="1" style="vertical-align:middle">OpenAI</label><button class="actBtn" type="submit">승인</button></form>` : ''}
 ${u.status === 'approved' && u.role !== 'admin' ? `<form class="inline" method="post" action="${PREFIX}/admin/users/openai-perm"><input type="hidden" name="username" value="${esc(u.username)}"><button class="actBtn" type="submit" style="background:#3a3a44" title="클라우드(OpenAI) TTS 허용 여부 전환 — 차단 시 로컬 엔진 고정">${(u.allow_openai == null || u.allow_openai) ? '☁️ 차단' : '☁️ 허용'}</button></form>` : ''}
 ${u.status === 'approved' && u.role !== 'admin' ? `<form class="inline" method="post" action="${PREFIX}/admin/deactivate"><input type="hidden" name="username" value="${esc(u.username)}"><button class="actBtn" type="submit" style="background:#8a6a20">비활성화</button></form>` : ''}
 ${u.status === 'disabled' ? `<form class="inline" method="post" action="${PREFIX}/admin/reactivate"><input type="hidden" name="username" value="${esc(u.username)}"><button class="actBtn" type="submit">재활성화</button></form>` : ''}
@@ -956,7 +956,7 @@ app.get(`${PREFIX}/admin`, requireAdmin, (req, res) => {
 app.post(`${PREFIX}/admin/approve`, requireAdmin, (req, res) => {
   // [2026-10-06, 사용자 요청] 승인 시 OpenAI(클라우드 TTS) 허용 여부 선택 — 사용자 탭의 승인 폼엔
   // 체크박스(openaiChoice 마커 있음)가 있고, 개요 탭의 간단 승인 폼은 마커가 없어 기본 허용(기존 동작).
-  const allow = req.body.openaiChoice ? (req.body.allowOpenai ? 1 : 0) : 1;
+  const allow = req.body.allowOpenai ? 1 : 0;  // [2026-10-13] 기본 차단(로컬 LLM) — 체크한 경우만 OpenAI 허용
   db.prepare("UPDATE users SET status='approved', approved_at=?, approved_by=?, allow_openai=? WHERE username=?")
     .run(new Date().toISOString(), req.user.id, allow, req.body.username);
   res.send(adminPage(`${req.body.username} 승인 완료 — OpenAI(클라우드) ${allow ? '허용' : '차단(로컬 전용)'}`, 'users'));
@@ -1123,7 +1123,7 @@ async function proxyToN8n(req, res, webhookPath, eventType) {
     res.status(502).json({ error: 'upstream 요청 실패: ' + e.message });
   }
 }
-app.post(`${PREFIX}/api/script`, requireApiAuth, (req, res) => proxyToN8n(req, res, 'koen-openai-script', 'script_call'));
+app.post(`${PREFIX}/api/script`, requireApiAuth, (req, res) => (req.user.role === 'admin' || Number(req.user.allow_openai == null ? 1 : req.user.allow_openai)) ? proxyToN8n(req, res, 'koen-openai-script', 'script_call') : res.status(403).json({ error: 'OpenAI 미허용 계정' }));
 app.post(`${PREFIX}/api/llm`, requireApiAuth, (req, res) => proxyToN8n(req, res, 'koen-local-llm', 'llm_call'));
 
 // ── 개인화 RAG — 임베딩은 서버만 n8n을 호출(클라이언트가 부를 수 있는 /api/embed 라우트 자체를

@@ -421,9 +421,10 @@ try{const se=localStorage.getItem('ppt_agent_tts_engine');if(se==='local'||se===
 // 서버가 주입한 window.__USER_PERM__({openai:bool}) 기준. 저장된 설정이 openai여도 강제 전환.
 if(window.__USER_PERM__&&!window.__USER_PERM__.openai){
   try{localStorage.setItem('ppt_agent_tts_engine','local')}catch(e){}
-  ttsEngine='local';
+  ttsEngine='local';scriptEngine='local';  // [2026-10-13] 미허용 계정은 LLM도 로컬 고정
   const _ob=document.getElementById('ttsOpenAI');
   if(_ob){_ob.style.display='none';_ob.title='관리자가 클라우드 엔진을 허용하지 않았습니다'}
+  window.addEventListener('DOMContentLoaded',()=>{try{setScriptEngine('local');const b=document.getElementById('setScrOpenAI');if(b)b.style.display='none'}catch(e){}});
 }
 // [2026-10-05 v9] 오래 열어둔 탭의 엔진 드리프트 방지 — 탭을 다시 보이게 하면 localStorage의 최신
 // 엔진·음성 설정을 메모리로 흡수한다. 실측(10:40 KST): openai 탭이 살아 있는 동안 설정을 local로
@@ -2166,7 +2167,7 @@ async function generateAnswer(q,ragPromise,stats){
   // [2026-10-13] LLM 1회 호출(OpenAI 우선 설정 또는 최신성 → 실패 시 로컬 폴백) — 재판정에서 재사용
   const callLLM=async(c)=>{
     let a='',e='';
-    if(scriptEngine==='openai'||wantsLatest){
+    if(scriptEngine==='openai'||(wantsLatest&&!(window.__USER_PERM__&&!window.__USER_PERM__.openai))){
       const _t0=Date.now();
       try{const r=await fetch(OPENAI_SCRIPT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:c}]})});const j=await r.json().catch(()=>({}));a=(j.content||'').trim();if(a)e='openai-script'}catch(er){if(stats)stats.errors.push('script:'+((er&&er.message)||'').slice(0,40))}
       if(stats)stats.scriptMs=(stats.scriptMs||0)+Date.now()-_t0;
@@ -3329,7 +3330,7 @@ function openSettings(){document.getElementById('settingsModal').classList.add('
 function closeSettings(){document.getElementById('settingsModal').classList.remove('show')}
 document.getElementById('btnSettings').onclick=openSettings;
 document.getElementById('settingsModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeSettings()});
-function setScriptEngine(m){scriptEngine=m;try{localStorage.setItem('ppt_agent_script_engine',m)}catch(e){}document.getElementById('setScrOpenAI').classList.toggle('on',m==='openai');document.getElementById('setScrLocal').classList.toggle('on',m==='local')}
+function setScriptEngine(m){if(m==='openai'&&window.__USER_PERM__&&!window.__USER_PERM__.openai)m='local';scriptEngine=m;try{localStorage.setItem('ppt_agent_script_engine',m)}catch(e){}document.getElementById('setScrOpenAI').classList.toggle('on',m==='openai');document.getElementById('setScrLocal').classList.toggle('on',m==='local')}
 const OPENAI_VOICES=['alloy','echo','fable','onyx','nova','shimmer'];
 // [2026-10-04] mlx Qwen3-TTS CustomVoice 모델 9화자 전수 실측 결과 — dylan/uncle_fu/sohee/serena/vivian만
 // 정상 생성(1~2초). eric/ryan/aiden/ono_anna는 EOS 생성 실패로 36초 지연+96초 무음 WAV를 돌려
