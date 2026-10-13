@@ -107,7 +107,7 @@ function page(title, body) {
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f1115;color:#e8e8ea;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0} /* 중앙정렬은 .adm min-height:100vh로 무력화 — 항상 상단 고정 */
 html{scrollbar-gutter:stable} /* [2026-10-05] 뷰포트 스크롤바는 html에 있으므로 root에 고정 — 탭 전환 좌우 흔들림 방지(body에 걸면 무효) */
-.box{background:#1a1d24;border:1px solid #2a2e38;border-radius:12px;padding:32px;width:320px}
+.box{background:#1a1d24;border:1px solid #2a2e38;border-radius:12px;padding:32px;width:320px;max-width:calc(100vw - 32px)}
 h1{font-size:1.2rem;margin:0 0 20px}
 label{display:block;font-size:.85rem;color:#9a9ea8;margin:14px 0 6px}
 input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;border:1px solid #333a46;background:#12141a;color:#e8e8ea;font-size:.95rem}
@@ -1655,6 +1655,10 @@ app.post(`${PREFIX}/api/qa-log`, requireApiAuth, (req, res) => {
     ragMs: b.ragMs ?? null, scriptMs: b.scriptMs ?? null, llmMs: b.llmMs ?? null,
     engine: b.engine || null, ragRefs: b.ragRefs ?? null, ragTimeout: !!b.ragTimeout,
     fillers: b.fillers ?? null, answerChars: b.answerChars ?? null, answerTtsMs: b.answerTtsMs ?? null,
+    // [2026-10-13] 답변 거절 진단 — 근거 검증 실패 사유·LLM 원답·재판정 여부("RAG에 있는데 없다고 함" 추적)
+    source: b.source || null, verifyWhy: b.verifyWhy ? String(b.verifyWhy).slice(0, 80) : null,
+    rawAns: b.rawAns ? String(b.rawAns).slice(0, 160) : null, firstRaw: b.firstRaw ? String(b.firstRaw).slice(0, 160) : null,
+    firstWhy: b.firstWhy ? String(b.firstWhy).slice(0, 80) : null, retried: !!b.retried,
     errors: Array.isArray(b.errors) ? b.errors.slice(0, 5) : [],
     events: Array.isArray(b.events) ? b.events.slice(0, 20) : [] };
   try { fs.appendFileSync(path.join(__dirname, 'eval', 'qa_log.jsonl'), JSON.stringify(rec) + '\n'); } catch (_) {}

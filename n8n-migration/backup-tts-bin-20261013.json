@@ -1,0 +1,37 @@
+{
+ "entity": {
+  "id": "bR07Dw3gICxbI215",
+  "name": "KOEN OpenAI TTS Binary (koen_openai_tts_bin)",
+  "active": 1,
+  "nodes": "[{\"id\": \"wh\", \"name\": \"Webhook\", \"type\": \"n8n-nodes-base.webhook\", \"typeVersion\": 2, \"position\": [0, 0], \"webhookId\": \"koenopenaittsbin\", \"parameters\": {\"httpMethod\": \"POST\", \"path\": \"koen-openai-tts-bin\", \"responseMode\": \"responseNode\", \"options\": {}}}, {\"id\": \"oa\", \"name\": \"OpenAI_TTS\", \"type\": \"n8n-nodes-base.httpRequest\", \"typeVersion\": 4.2, \"position\": [220, 0], \"parameters\": {\"method\": \"POST\", \"url\": \"https://api.openai.com/v1/audio/speech\", \"authentication\": \"predefinedCredentialType\", \"nodeCredentialType\": \"openAiApi\", \"sendBody\": true, \"contentType\": \"json\", \"specifyBody\": \"json\", \"jsonBody\": \"={{ JSON.stringify({model: $json.body.model || \\\"tts-1-hd\\\", input: $json.body.input, voice: $json.body.voice || \\\"onyx\\\", response_format: \\\"wav\\\", speed: 1.0}) }}\", \"options\": {\"timeout\": 120000, \"response\": {\"response\": {\"responseFormat\": \"file\"}}}}, \"credentials\": {\"openAiApi\": {\"id\": \"pNHoRtEfVoksSVKC\", \"name\": \"OpenAI 2026-05\"}}}, {\"id\": \"resp\", \"name\": \"Respond\", \"type\": \"n8n-nodes-base.respondToWebhook\", \"typeVersion\": 1.1, \"position\": [440, 0], \"parameters\": {\"respondWith\": \"binary\", \"inputDataFieldName\": \"data\"}}]",
+  "connections": "{\"Webhook\": {\"main\": [[{\"node\": \"OpenAI_TTS\", \"type\": \"main\", \"index\": 0}]]}, \"OpenAI_TTS\": {\"main\": [[{\"node\": \"Respond\", \"type\": \"main\", \"index\": 0}]]}}",
+  "settings": "{}",
+  "staticData": null,
+  "pinData": null,
+  "versionId": "568aadf9-1f72-4517-9964-bba520167db2",
+  "triggerCount": 1,
+  "meta": null,
+  "parentFolderId": null,
+  "createdAt": "2026-10-04 05:55:08.000",
+  "updatedAt": "2026-10-04 05:55:08.000",
+  "isArchived": 0,
+  "versionCounter": 1,
+  "description": null,
+  "activeVersionId": "568aadf9-1f72-4517-9964-bba520167db2",
+  "nodeGroups": "[]",
+  "sourceWorkflowId": null
+ },
+ "history": {
+  "versionId": "568aadf9-1f72-4517-9964-bba520167db2",
+  "workflowId": "bR07Dw3gICxbI215",
+  "authors": "n8n api export (mini→studio)",
+  "createdAt": "2026-10-04 05:57:37.000",
+  "updatedAt": "2026-10-04 05:57:37.000",
+  "nodes": "[{\"id\": \"wh\", \"name\": \"Webhook\", \"type\": \"n8n-nodes-base.webhook\", \"typeVersion\": 2, \"position\": [0, 0], \"webhookId\": \"koenopenaittsbin\", \"parameters\": {\"httpMethod\": \"POST\", \"path\": \"koen-openai-tts-bin\", \"responseMode\": \"responseNode\", \"options\": {}}}, {\"id\": \"oa\", \"name\": \"OpenAI_TTS\", \"type\": \"n8n-nodes-base.httpRequest\", \"typeVersion\": 4.2, \"position\": [220, 0], \"parameters\": {\"method\": \"POST\", \"url\": \"https://api.openai.com/v1/audio/speech\", \"authentication\": \"predefinedCredentialType\", \"nodeCredentialType\": \"openAiApi\", \"sendBody\": true, \"contentType\": \"json\", \"specifyBody\": \"json\", \"jsonBody\": \"={{ JSON.stringify({model: $json.body.model || \\\"tts-1-hd\\\", input: $json.body.input, voice: $json.body.voice || \\\"onyx\\\", response_format: \\\"wav\\\", speed: 1.0}) }}\", \"options\": {\"timeout\": 120000, \"response\": {\"response\": {\"responseFormat\": \"file\"}}}}, \"credentials\": {\"openAiApi\": {\"id\": \"pNHoRtEfVoksSVKC\", \"name\": \"OpenAI 2026-05\"}}}, {\"id\": \"resp\", \"name\": \"Respond\", \"type\": \"n8n-nodes-base.respondToWebhook\", \"typeVersion\": 1.1, \"position\": [440, 0], \"parameters\": {\"respondWith\": \"binary\", \"inputDataFieldName\": \"data\"}}]",
+  "connections": "{\"Webhook\": {\"main\": [[{\"node\": \"OpenAI_TTS\", \"type\": \"main\", \"index\": 0}]]}, \"OpenAI_TTS\": {\"main\": [[{\"node\": \"Respond\", \"type\": \"main\", \"index\": 0}]]}}",
+  "name": "KOEN OpenAI TTS Binary (koen_openai_tts_bin)",
+  "autosaved": 0,
+  "description": null,
+  "nodeGroups": "[]"
+ }
+}

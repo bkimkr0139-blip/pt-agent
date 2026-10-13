@@ -2,7 +2,10 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#080b12" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
 <title>🎤 AI 프레젠터</title>
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
@@ -191,6 +194,48 @@ body.fs .main{height:100vh;height:100dvh}
   .ticker{left:10px;right:10px;bottom:52px}
   .iconBtn{width:40px;height:40px}
   #dropZone{padding:40px 24px}
+  /* [모바일 v2] 안전영역·터치 타깃·컨트롤바 2줄·iOS 입력 확대 방지 */
+  body{overscroll-behavior:none;-webkit-text-size-adjust:100%}
+  .topBar{padding:0 max(12px,env(safe-area-inset-right)) 0 max(12px,env(safe-area-inset-left));height:48px;gap:6px}
+  .topBar h1{font-size:.88rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .main{height:calc(100dvh - 48px)}
+  body.fs .main{height:100dvh}
+  .iconBtn{width:42px;height:42px}
+  .ctrlBar{flex-wrap:wrap;row-gap:8px;padding:10px max(10px,env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left))}
+  .ctrBtn{min-height:42px;min-width:42px}
+  .ctrBtn.play{min-width:84px;flex:1}
+  .prog{order:10;flex:1 1 60%;height:8px}
+  .sldNum{order:11;min-width:44px}
+  .slideContent{padding:8px 10px calc(132px + env(safe-area-inset-bottom))}
+  .ticker{left:8px;right:8px;bottom:calc(104px + env(safe-area-inset-bottom));padding:6px 12px;min-height:38px}
+  .ticker-text{font-size:.8rem}
+  .annoBar{right:max(4px,env(safe-area-inset-right))}
+  .annoBar .aBtn{min-width:40px;min-height:40px;font-size:.9rem}
+  .annoBar .dot{width:26px;height:26px}
+  #zoomChip{left:10px;bottom:calc(150px + env(safe-area-inset-bottom))}
+  #noteBox{left:8px;right:8px;width:auto;bottom:calc(150px + env(safe-area-inset-bottom));max-height:40vh}
+  .sidePanel{padding-bottom:env(safe-area-inset-bottom)}
+  .sldItem{padding:13px 16px}
+  .modalCard,.annoCard{max-height:86dvh;overflow-y:auto;padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+  .setBtn{padding:10px 14px;min-height:40px}
+  .modalClose{min-height:44px}
+  input,select,textarea,.annoCard select,.annoCard textarea{font-size:16px!important}
+  #uploadScreen{padding:16px 16px calc(16px + env(safe-area-inset-bottom));justify-content:flex-start}
+  .uploadStep{flex-wrap:wrap;justify-content:center;font-size:.74rem}
+  #refZone{padding:14px 16px}
+}
+@media (max-width:640px) and (orientation:landscape),(max-height:480px){
+  .topBar{height:40px}
+  .main{height:calc(100dvh - 40px)}
+  .slideContent{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+  .ticker{bottom:calc(60px + env(safe-area-inset-bottom))}
+  .ctrlBar{flex-wrap:nowrap}
+  .prog{order:0;flex:1}
+  #zoomChip,#noteBox{bottom:calc(100px + env(safe-area-inset-bottom))}
+}
+@media (pointer:coarse){
+  .annoBar .aBtn,.ctrBtn,.iconBtn{touch-action:manipulation}
+  .acctMenu a{padding:14px 16px}
 }
 </style>
 </head>
@@ -385,8 +430,14 @@ try{micCmdEnabled=localStorage.getItem('ppt_agent_mic_cmd')==='1'}catch(e){}
 let hudBottom=false;  // [2026-10-06] 발표 하단 표시(캡션·컨트롤바) — 기본 끔(집중 모드)
 try{hudBottom=localStorage.getItem('ppt_agent_hud')==='1'}catch(e){}
 let _presStarted=false;  // [2026-10-06] 발표 진행 중(재생+일시정지 포함) 표식 — 정지 후엔 컨트롤바를 계속 보여주기 위함
-let ttsSpeed=(()=>{try{const s=parseFloat(localStorage.getItem('ppt_agent_speed'));return s>=0.8&&s<=2?s:1.38}catch(e){return 1.38}})();
-function setTtsSpeed(v){ttsSpeed=+v;document.getElementById('speedVal').textContent=ttsSpeed.toFixed(2)+'x';try{localStorage.setItem('ppt_agent_speed',ttsSpeed)}catch(e){}updateSpeedTotalTime()}
+let ttsSpeed=(()=>{try{const s=parseFloat(localStorage.getItem('ppt_agent_speed'));return s>=0.8&&s<=2?s:1.0}catch(e){return 1.0}})();
+// [2026-10-12 속도 미반영 수정] 로컬(Qwen3) TTS 요청엔 speed 파라미터가 없고 재생에도 배속이 없어 슬라이더가
+// 로컬 엔진에서 무효였다(speed는 OpenAI 경로 본문에만 있었음). 로컬 생성 음성은 재생 단계에서 playbackRate로
+// 배속(피치 보존). OpenAI 음성은 서버가 이미 속도를 반영하므로 이중 배속 방지를 위해 제외.
+const _localUrls=new Set();
+function _localUrl(u){_localUrls.add(u);if(_localUrls.size>200)_localUrls.delete(_localUrls.values().next().value);return u}
+function applyPlaybackRate(){if(!audioEl)return;const loc=_localUrls.has(audioEl.src)||_localUrls.has(audioEl._srcUrl);audioEl.preservesPitch=true;audioEl.webkitPreservesPitch=true;audioEl.playbackRate=loc?ttsSpeed:1}
+function setTtsSpeed(v){ttsSpeed=+v;if(typeof applyPlaybackRate==='function')applyPlaybackRate();document.getElementById('speedVal').textContent=ttsSpeed.toFixed(2)+'x';try{localStorage.setItem('ppt_agent_speed',ttsSpeed)}catch(e){}updateSpeedTotalTime()}
 // [2026-09-29] 발표 속도 슬라이더 옆에 예상 총 발표 시간 표시 — 슬라이드별 실제 스크립트가
 // 아직 생성 전이면(LLM 호출 전) note/bullets/title로 대체 추정(ponytail: 정확한 산출 아님,
 // 실제 스크립트가 생성되면 그 길이로 자동 갱신됨 — 슬라이드 진행 중 openSettings 재호출 시 반영).
@@ -458,7 +509,9 @@ const CACHED_PHRASES=['질문해 주세요.','다른 질문 없으시면 계속 
 // [2026-10-05] RAG 미스 정직 거절 멘트 — 참고자료가 아예 없으면 LLM을 돌리지 않고 이대로 답변한다.
 // 사용자 지시: "로컬 LLM의 한계이므로 RAG에 없는 답변을 못한다는 점을 밝히도록". 약한 참조(스코어
 // 0.3 미만)는 기존대로 [주의] 프롬프트와 함께 LLM 답변을 유지 — 완전 미스만 거절로 전환.
-const RAG_MISS_MSG='죄송합니다. 로컬 데이터베이스에서 해당 질문에 대한 답을 찾지 못했습니다. 로컬 LLM의 한계로, 자료에 없는 내용은 답변드릴 수 없습니다. 답변하지 못한 질문은 기록해 관리자가 자료를 보강하겠습니다.';
+// [2026-10-13 사용자 지시] 근거·출처가 명확하지 않으면 추측 대신 이 문구로만 거절한다(할루시네이션 금지).
+const NO_INFO_MSG='관련 정보가 없어서 지금은 제가 답변드릴 수 없습니다.';
+const RAG_MISS_MSG=NO_INFO_MSG;
 // [2026-10-05 v2] 거절 멘트 2구문으로 분할 — 60자 통짜는 프록시에서 절단 take→SPLIT 스톰(18.6s 실측)을
 // 밟아 발표 중 프리페치가 GPU를 길게 점유한다(질문 답변 지연·화자 이탈의 경합 원인). 짧은 조각은 1회 성공.
 const NO_ANSWER_TOKEN='[[NO_ANSWER]]';  // LLM 센티널 — 근거 없으면 이 토큰만 출력하도록 강제(아래 ctx 주입)
@@ -1308,6 +1361,27 @@ function koNizeTts(text){
 // [2026-10-05 v2] signal — 직렬 큐가 폐기(purge) 시 인플라이트 요청을 즉시 중단할 수 있게 하는
 // 외부 중단 신호(19:08 고장: 44.5s 프리페치 사슬이 Q&A 음성을 전부 굶겨 침묵). 신호가 끊기면
 // 진행 중 fetch가 즉시 거부되고, ttsSentence는 기존 정책대로 null 반환(재요청은 발표 재개 시).
+// [2026-10-13 점검] OpenAI TTS 입력 정제 — tts-1-hd는 마크다운·기호·영문 약어·범위표기에서 발음이 꼬이거나 기호를 읽는다.
+function ttsPrepareOpenAi(text){
+  let t=String(text||'');
+  t=t.replace(/[*#`>|_]+/g,' ').replace(/\[(.*?)\]\(.*?\)/g,'$1');          // 마크다운 서식·링크
+  t=t.replace(/(\d)\s*~\s*(\d)/g,'$1에서 $2').replace(/~/g,' ');            // 2~4주 → 2에서 4주
+  t=t.replace(/(\d)\s*%/g,'$1퍼센트').replace(/&/g,' 앤 ');
+  t=t.replace(/[·•▪]/g,', ').replace(/[→⇒]/g,' ').replace(/[“”"]/g,'').replace(/\s*[\/]\s*/g,' ');
+  t=koNizeTts(t);                                                                 // IoT/BLE/KPI → 한글 발음
+  t=t.replace(/\s+/g,' ').trim();
+  if(!/[.!?。…]$/.test(t))t+='.';                                                 // 종결부호 없으면 끝음절이 흐려지거나 잘린다
+  return t;
+}
+// WAV 헤더로 길이(초) 계산 — 파싱 실패 시 null(검증 생략)
+async function wavSeconds(b){
+  try{const h=new DataView(await b.slice(0,44).arrayBuffer());
+    if(h.getUint32(0,false)!==0x52494646)return null;  // 'RIFF'
+    const ch=h.getUint16(22,true),sr=h.getUint32(24,true),bits=h.getUint16(34,true);
+    if(!ch||!sr||!bits)return null;
+    return Math.max(0,b.size-44)/(sr*ch*(bits/8));
+  }catch(e){return null}
+}
 async function ttsSentence(text,signal,opts){if(!text||text.length<3)return null;
 const _verify=!!(opts&&opts.verify);  // [2026-10-06] 답변·멘트는 프록시에서 ASR 역검증 — qwen3 TTS가 한국어 텍스트를 중국어로 발음한 실측([me57] 날씨 즉답) 재발 방지
 const _t0=Date.now();
@@ -1318,9 +1392,20 @@ try{
     for(let attempt=0;attempt<2;attempt++){
       if(signal&&signal.aborted)break;  // [2026-10-05 v2] 외부 중단 — 재시도 루프 즉시 탈출
       try{
+        // [2026-10-13 점검] 발음 꼬임 방지 — ①입력 정제(마크다운·기호·범위표기·%)+영문 한글화(로컬 경로와 동일 koNizeTts):
+        // 이전엔 원문을 그대로 보내 "IoT/BLE/KPI/30%/2~4주/**…**" 같은 토큰에서 영어식 발음·기호 낭독·끊김이 났다
+        // ②속도는 n8n 워크플로가 1.0 고정(요청 speed 무시)이라 슬라이더가 무효였다 → speed:1 고정 요청 + 재생 단계 배속(로컬과 동일)
+        // ③생성 길이 검증 — 글자 수 대비 비정상 길이(잘림·긴 무음)면 1회 재생성.
+        const _oin=ttsPrepareOpenAi(text);
         const r=await fetch('https://bc.wizbase.ai.kr/webhook/koen-openai-tts-bin',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({input:text,voice:ttsVoice,speed:ttsSpeed}),signal});
-        if(r.ok){const b=await r.blob();if(b.size>1000){dbg('TTS[openai] OK '+b.size+'B '+(Date.now()-_t0)+'ms');return URL.createObjectURL(b)}console.warn('TTS(openai): 응답 크기 이상',b.size)}
+          body:JSON.stringify({input:_oin,voice:ttsVoice,speed:1}),signal});
+        if(r.ok){const b=await r.blob();
+          if(b.size>1000){
+            const _sec=await wavSeconds(b),_n=_oin.replace(/[^가-힣A-Za-z0-9]/g,'').length,_ratio=_sec&&_n?_sec/_n:null;
+            if(_ratio!==null&&(_ratio<0.05||_ratio>0.6)&&attempt===0){dbg('⚠ TTS[openai] 길이 이상('+_sec.toFixed(1)+'s/'+_n+'자) — 재생성');qaLog('tts_openai_anomaly',{sec:+_sec.toFixed(2),chars:_n});continue}
+            dbg('TTS[openai] OK '+b.size+'B '+(Date.now()-_t0)+'ms'+(_sec?' '+_sec.toFixed(1)+'s':''));return _localUrl(URL.createObjectURL(b))
+          }
+          console.warn('TTS(openai): 응답 크기 이상',b.size)}
         else{console.warn('TTS(openai) 실패:',r.status,'attempt',attempt);dbg('TTS[openai] HTTP'+r.status)}
       }catch(e){console.warn('TTS(openai) 예외:',e.message,'attempt',attempt);dbg('TTS[openai] 예외:'+e.message)}
       if(attempt===0)await new Promise(res=>setTimeout(res,200));
@@ -1349,7 +1434,7 @@ try{
       try{
         const r2=await fetch(TTS_URL,{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({model:'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16',input:koNizeTts(text),voice:ttsVoice,language:'ko',response_format:'wav',instruct:STYLE,temperature:0.15,repetition_penalty:1.15,verify_lang:_verify,ment:(opts&&opts.ment)||undefined}),signal:ac2.signal});
-        if(r2.ok){const b2=await r2.blob();if(b2.size>1000&&b2.size<4000000){const _dt=Date.now()-_t0;if(playing)_presLockSet();dbg('TTS[local] OK(재시도) '+b2.size+'B '+_dt+'ms'+(_dt>=5000?' ⚠지연':''));return URL.createObjectURL(b2)}console.warn('TTS(local) 재시도: 응답 크기 이상',b2.size)}
+        if(r2.ok){const b2=await r2.blob();if(b2.size>1000&&b2.size<4000000){const _dt=Date.now()-_t0;if(playing)_presLockSet();dbg('TTS[local] OK(재시도) '+b2.size+'B '+_dt+'ms'+(_dt>=5000?' ⚠지연':''));return _localUrl(URL.createObjectURL(b2))}console.warn('TTS(local) 재시도: 응답 크기 이상',b2.size)}
         else{console.warn('TTS(local) 재시도 실패:',r2.status);dbg('TTS[local] 재시도 HTTP'+r2.status)}
       }catch(e2){dbg('TTS[local] 재시도 '+e2.name+':'+(e2.message||'').slice(0,40))}
       finally{clearTimeout(to2)}
@@ -1357,7 +1442,7 @@ try{
     return null
   }
   const b=await r.blob();if(b.size>1000&&b.size<4000000){const _dt=Date.now()-_t0;if(playing)_presLockSet();  // [2026-10-05] TTS 활동 하트비트 — 백그라운드 탭 인터벌 스로틀 대비 락 갱신
-dbg('TTS[local] OK '+b.size+'B '+_dt+'ms'+(_dt>=5000?' ⚠지연':''));if(_dt>=5000)qaLog('tts_slow',{ms:_dt,chars:text.length,size:b.size});return URL.createObjectURL(b)}console.warn('TTS(local): 응답 크기 이상',b.size);dbg('TTS[local] 크이상 '+b.size+'B')
+dbg('TTS[local] OK '+b.size+'B '+_dt+'ms'+(_dt>=5000?' ⚠지연':''));if(_dt>=5000)qaLog('tts_slow',{ms:_dt,chars:text.length,size:b.size});return _localUrl(URL.createObjectURL(b))}console.warn('TTS(local): 응답 크기 이상',b.size);dbg('TTS[local] 크이상 '+b.size+'B')
 }catch(e){console.warn('TTS 예외:',e);dbg('TTS 예외:'+(e.message||e.name||'').slice(0,50))}
 dbg('TTS 변환 실패 — 이 문장은 건너뜀(브라우저 폴백 없음)');return null}
 // ── [2026-10-06 사용자 지정] 발화 감지 볼륨 더킹 ──
@@ -1366,7 +1451,28 @@ dbg('TTS 변환 실패 — 이 문장은 건너뜀(브라우저 폴백 없음)')
 // 시스템이 답변·멘트를 말하기 시작하면(speakUnified·speakQaAnswer) 즉시 원래 값(1.0)으로
 // 회복한다. 발화 종료 3초 뒤 자동 해제 — 레벨 2는 회복 경로 누락 대비 12초 안전망.
 let _duckLevel=0,_duckTimer=null;
-function applyDuckVol(){if(audioEl)audioEl.volume=(_duckLevel===2?0.5:(_duckLevel===1?0.7:1))}
+// [2026-10-13 점검] 더킹을 GainNode 경유로 — ①iOS Safari는 HTMLMediaElement.volume이 읽기 전용이라 모바일에선
+// 더킹이 통째로 무효였다 ②단계 점프(클릭 노이즈·부자연스러움) 대신 ramp(내릴 땐 30ms로 빠르게, 올릴 땐
+// 120ms로 부드럽게). AudioContext가 running일 때만 경유하고, 아니면(자동재생 정책 등) 기존 element.volume 폴백 —
+// 경유했는데 컨텍스트가 멈추면 무음이 되므로 running이 아닐 땐 절대 경유하지 않는다.
+let _actx=null;
+function _ensureActx(){
+  try{
+    if(!_actx){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;_actx=new AC();_actx.onstatechange=()=>{if(_actx.state!=='running'&&_actx.state!=='closed')_actx.resume().catch(()=>{})}}
+    if(_actx.state!=='running')_actx.resume().catch(()=>{});
+    return _actx.state==='running'?_actx:null;
+  }catch(e){return null}
+}
+['pointerdown','keydown','touchend'].forEach(ev=>document.addEventListener(ev,()=>{_ensureActx()},{passive:true}));  // 사용자 제스처에서 컨텍스트 생성·재개(자동재생 정책 통과)
+function _duckTarget(){return _duckLevel===2?0.5:(_duckLevel===1?0.7:1)}
+function applyDuckVol(){
+  if(!audioEl)return;
+  const t=_duckTarget();
+  if(audioEl._gain&&_actx&&_actx.state==='running'){
+    try{const g=audioEl._gain.gain,now=_actx.currentTime;g.cancelScheduledValues(now);g.setValueAtTime(g.value,now);g.setTargetAtTime(t,now,t<g.value?0.03:0.12);return}catch(e){}
+  }
+  audioEl.volume=t;
+}
 function duckVol(level){
   if(_duckLevel<level){_duckLevel=level;applyDuckVol()}
   clearTimeout(_duckTimer);  // 같은 레벨 재감지에도 타이머 연장 — 말이 이어지는 동안 유지
@@ -1382,7 +1488,8 @@ function playAudio(url){return new Promise(r=>{
   if(_audioFin)_audioFin('교체');
   if(audioEl){audioEl.pause();audioEl=null}
   audioEl=new Audio();
-  audioEl.volume=(_duckLevel===2?0.5:(_duckLevel===1?0.7:1));  // [2026-10-06 사용자 지정] 생성 시점 더킹 레벨 반영
+  audioEl.volume=_duckTarget();  // [2026-10-06 사용자 지정] 생성 시점 더킹 레벨 반영
+  {const ac=_ensureActx();if(ac){try{const src=ac.createMediaElementSource(audioEl),g=ac.createGain();g.gain.value=_duckTarget();src.connect(g);g.connect(ac.destination);audioEl._gain=g;audioEl.volume=1}catch(e){audioEl._gain=null}}}  // [2026-10-13] GainNode 경유 — 실패하면 element.volume 폴백
   ttsSpeaking=true;
   // [2026-10-04] 감시자 — canplay/onended/onerror 중 무엇도 안 오는 Chrome 상태에서 재생 체인이
   // 영원히 멈추는 것을 방지. 정상 종료든 타임아웃이든 딱 한 번만 해제된다.
@@ -1402,8 +1509,10 @@ function playAudio(url){return new Promise(r=>{
   // v7 버그: 진입 8초 후 무조건 발동해 8초보다 긴 문장을 재생 중에 잘라버렸다(실측: 17~21초
   // 문장이 전부 8초에 컷 → 말이 사라지고 다음 문장으로 건너뜀). 이후 정체는 120s 상한이 담당.
   // [2026-10-04 v9] duration 병기 — "의심 짧은 음성"(잘린 생성) 원격 진단용.
-  audioEl.oncanplay=()=>{clearTimeout(canTo);const d=audioEl.duration;dbg('디코딩 완료 → play() ('+(d&&isFinite(d)?d.toFixed(1)+'s':'?')+')');audioEl.play().catch(e=>{console.warn('오디오 재생 차단(자동재생 정책 등):',e.name,e.message);dbg('⚠ 재생 차단:'+e.name+' — 화면 한 번 클릭 후 재시도');fin('차단'+e.name)})};
+  audioEl.oncanplay=()=>{clearTimeout(canTo);applyPlaybackRate();const d=audioEl.duration;dbg('디코딩 완료 → play() ('+(d&&isFinite(d)?d.toFixed(1)+'s':'?')+')');audioEl.play().catch(e=>{console.warn('오디오 재생 차단(자동재생 정책 등):',e.name,e.message);dbg('⚠ 재생 차단:'+e.name+' — 화면 한 번 클릭 후 재시도');fin('차단'+e.name)})};
+  audioEl._srcUrl=url;
   audioEl.src=url;
+  applyPlaybackRate();
   audioEl.load();
 })}
 let _audioFin=null;  // 진행 중인 playAudio의 fin — pause/stop이 즉시 해제
@@ -1417,11 +1526,14 @@ function noteSpoken(text){
   if(!text)return;
   _lastSpoken=text;
   _recentSpoken.push(text);
+  // [2026-10-13 점검] TTS는 영문을 한글 발음으로 바꿔 읽는다(koNizeTts: IoT→아이오티). STT는 그 소리를 한글로
+  // 받아 적는데, 에코 대조 코퍼스엔 영문 원문만 있어 영문 포함 문장의 반향이 8자 윈도우를 놓쳤다. 한글화 형태도 같이 적재.
+  try{if(/[A-Za-z]/.test(text)&&typeof koNizeTts==='function'){const k=koNizeTts(text);if(k&&k!==text)_recentSpoken.push(k)}}catch(e){}
   // [2026-10-06 7weo] 3→8 확장 — TTS 재생이 STT 블롭을 열어두면 최종 인식분에 최대 ~30초 치
   // 내레이션이 축적돼 한 파이널로 뱉힌다. 3개 윈도우(~15초)에선 축적분의 에코 문장이 이미
   // 밀려나 out되어 isEcho가 놓쳤고(실측 [7weo] +165.9s), 놓친 에코가 질문 본문이 돼 엉뚱한
   // 답변 생성으로 이어졌다. 8개(~30-40초)면 블롭 축적분을 커버한다.
-  if(_recentSpoken.length>8)_recentSpoken.shift();
+  while(_recentSpoken.length>10)_recentSpoken.shift();  // 원문+한글화 쌍이 들어가므로 8→10
 }
 
 // [2026-09-29 v2] 예전엔 TTS 종료 후 1.2초간 STT 결과를 무조건 차단했는데(쿨다운), 발표자가
@@ -1856,6 +1968,70 @@ function parametricAnswerable(q){
 // 이건 엔진 선택이지 접수 게이트가 아니므로 안전. 실패 시 기존 로컬 폴백이 그대로 받는다.
 const LATEST_RE=/(최신|최근|요즘|요새|트렌드|뉴스|화제|올해|이번\s?해|작년|내년|언제\s?(나왔|나온|출시|발표|릴리즈)|가장\s?최근)/;
 
+// ── [2026-10-13 사용자 지시] 근거·출처 기반 답변 — 할루시네이션 차단 ──
+// 정책: ①첨부 문서(RAG)·슬라이드·발표 문장에 근거가 있으면 그것만으로 답하고 출처를 밝힌다.
+// ②자료에 없는 일반 상식은 LLM이 확실할 때만 답하되 "일반 상식"임을 밝힌다. ③그 외엔 NO_INFO_MSG.
+// LLM의 자기 선언([근거:…] 태그)을 믿지 않고 클라이언트가 어휘 대조로 재검증한다 — 설정(OpenAI/로컬) 무관.
+const GENERAL_ALLOW_NEW_NUMBERS=false;  // 일반 상식 답변에 질문에 없는 숫자(연도·수치)를 허용할지 — 검증 불가라 기본 차단
+const GROUND_MIN_OVERLAP=0.35;           // 자료 기반 답변의 한글 2-gram 중 근거 본문에 실존해야 하는 최소 비율
+const _BG_STOP=new Set(['입니','니다','습니','합니','있습','됩니','때문','라고','에서','으로','하는','되는','있는','경우','통해','대한','위한','않습','수있','할수','합니다']);
+function _evNorm(t){return ' '+String(t||'').toLowerCase().replace(/(\d),(?=\d{3})/g,'$1').replace(/[^0-9a-z가-힣.]+/g,' ').replace(/\.(?!\d)/g,' ')+' '}
+function _hasTok(evN,tok){return new RegExp('(^|[^0-9a-z])'+tok.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![0-9a-z])').test(evN)}
+function _koBigrams(t){const k=String(t||'').replace(/[^가-힣]/g,'');const o=[];for(let i=0;i<k.length-1;i++){const b=k.slice(i,i+2);if(!_BG_STOP.has(b))o.push(b)}return o}
+// 답변이 근거 본문에 실제로 있는 내용인지 — 숫자·영문 토큰은 전부 실존해야 하고, 한글은 2-gram 겹침으로 판정
+function groundedIn(ans,evidence){
+  const evN=_evNorm(evidence);
+  const toks=(_evNorm(ans).match(/\d+(?:\.\d+)?|[a-z][a-z0-9]+/g)||[]);
+  for(const t of toks)if(!_hasTok(evN,t))return{ok:false,why:'미실존토큰:'+t};
+  const bg=_koBigrams(ans),evK=evN.replace(/[^가-힣]/g,'');
+  if(bg.length<4)return{ok:true,ratio:1};
+  let hit=0;for(const b of bg)if(evK.includes(b))hit++;
+  const ratio=hit/bg.length;
+  return ratio>=GROUND_MIN_OVERLAP?{ok:true,ratio}:{ok:false,why:'근거겹침 '+ratio.toFixed(2)};
+}
+function buildAnswerCtx(q,s,refs){
+  let c='당신은 발표 중입니다. 청중이 질문했습니다. 아래 우선순위를 정확히 따라 2~3문장으로 간결하게 답하세요.\n'
+   +'1순위: [참고 자료]·[슬라이드]·[발표 중 문장]에 근거가 있으면 그 내용만으로 답하고, 자료에 없는 수치·날짜·고유명사는 덧붙이지 마세요. 자료 기반 답변에는 출처·파일명을 언급하지 마세요(자료는 내장 지식입니다). 답 맨 끝에 [근거:자료N](N=참고 자료 번호) 또는 [근거:슬라이드]를 붙이세요.\n'
+   +'2순위: 자료에 근거가 없어도 널리 알려진 일반 상식·공개 지식을 확실히 알면 답하고 맨 끝에 [근거:일반]을 붙이세요. 이 발표·회사 내부 사실(인원·실적·일정·계약)과 최신 뉴스·시세·날씨·출시일·통계 같은 시의성 정보는 일반 지식으로 답하지 마세요.\n'
+   +'3순위: 근거와 출처가 명확하지 않거나 조금이라도 확신이 없으면 추측하지 말고 다른 말 없이 정확히 '+NO_ANSWER_TOKEN+' 토큰만 출력하세요.\n'
+   +'[슬라이드] '+(s?s.title:'')+'\n[발표 중 문장] '+(sentences[curSentenceIdx]||'')+'\n[질문] '+q;
+  if(refs&&refs.length)c+='\n[참고 자료]\n'+refs.map((r,i)=>(i+1)+'. '+(r.origin==='auto'?'(자동 학습·검증 전) ':'')+r.text.slice(0,800)).join('\n');
+  return c;
+}
+// 반환 {ok,source('doc'|'auto'|'slide'|'general'),prefix,text,why}
+function verifyAnswer(q,raw,refs,s){
+  const tagM=[...String(raw).matchAll(/\[\s*근거\s*[:：]\s*([^\]]*)\]/g)];
+  const tag=tagM.length?tagM[tagM.length-1][1]:'';
+  const text=String(raw).replace(/\[\s*근거\s*[:：][^\]]*\]/g,'').replace(/\s+/g,' ').trim();
+  if(!text)return{ok:false,why:'빈 답변'};
+  const slideEv=(s?s.title:'')+' '+(sentences[curSentenceIdx]||'');
+  const refEv=(refs||[]).map(r=>r.text).join(' ');
+  const isGeneral=/일반/.test(tag);
+  if(isGeneral){
+    // 일반 상식 — 내부 사실·시의성 질문은 검증 불가이므로 거절, 신규 숫자 차단
+    if(!parametricAnswerable(q))return{ok:false,why:'일반상식 불가: 내부사실 질문'};
+    if(LATEST_RE.test(q)||VOLATILE_RE.test(q))return{ok:false,why:'일반상식 불가: 시의성 질문'};
+    if(!GENERAL_ALLOW_NEW_NUMBERS){
+      const qN=_evNorm(q);
+      for(const t of (_evNorm(text).match(/\d+(?:\.\d+)?/g)||[]))if(!_hasTok(qN,t))return{ok:false,why:'일반상식 신규숫자:'+t};
+    }
+    return{ok:true,source:'general',text,prefix:'일반적인 상식으로 말씀드리면, '};
+  }
+  // 자료 근거 — 태그가 가리킨 참고 자료(없으면 전체)+슬라이드를 근거 본문으로 재대조
+  const nums=(tag.match(/\d+/g)||[]).map(Number).filter(n=>n>=1&&n<=(refs||[]).length);
+  if(/자료/.test(tag)&&/\d/.test(tag)&&!nums.length)return{ok:false,why:'존재하지 않는 자료 번호'};
+  const picked=nums.length?nums.map(n=>refs[n-1]):(refs||[]);
+  const onlySlide=/슬라이드/.test(tag)&&!/자료/.test(tag);
+  const evidence=(onlySlide?'':picked.map(r=>r.text).join(' ')+' ')+slideEv;
+  if(!tag&&!refEv&&!slideEv.trim())return{ok:false,why:'태그·근거 없음'};
+  const g=groundedIn(text,evidence);
+  if(!g.ok)return{ok:false,why:g.why};
+  if(onlySlide||(!picked.length))return{ok:true,source:'slide',text,prefix:''};
+  const top=picked[0];
+  if(top.origin==='auto')return{ok:true,source:'auto',text,prefix:'클라우드 AI로 보강한 참고 정보(검증 전) 기준으로 말씀드리면, '};
+  return{ok:true,source:'doc',text,prefix:''};  // [2026-10-13] 첨부 문서 내용은 내장 지식 — 출처 언급 없음
+}
+
 async function generateAnswer(q,ragPromise,stats){
   const s=slides[curSlideIdx];
   // [2026-10-05 v2] 센티널 강제 — 실측(발표 [b0tm] 후속): "답하거나 ~로 마무리"식 이중 지시는
@@ -1863,7 +2039,8 @@ async function generateAnswer(q,ragPromise,stats){
   // 또한 이 임베딩은 점수로 관련성 구분이 불가능(실측: SSOT 정답 질문 0.376 vs RBAC 무관 질문 0.374,
   // 덱에 있는 임직원 수 질문은 0.283) → 클라이언트 점수 게이트 대신 LLM 자판단+하드 토큰으로 판정하고,
   // 토큰이 오면 정직 거절 멘트로 교체한다. 거절 문구는 LLM이 만들지 않는다(클라이언트 상수).
-  let ctx='당신은 발표 중입니다. 청중이 질문했습니다. [참고 자료]·[슬라이드]·[발표 중 문장]에 근거가 있는 내용만 간결하게 답하세요(2~3문장). 근거가 없는 내용(수치·일정·용어 정의·외부 지식)은 절대 지어내지 말고, 답할 수 없으면 다른 말 없이 정확히 '+NO_ANSWER_TOKEN+' 토큰만 출력하세요.\n[슬라이드] '+(s?s.title:'')+'\n[발표 중 문장] '+(sentences[curSentenceIdx]||'')+'\n[질문] '+q;
+  let _refsUsed=[];  // [2026-10-13] 검증 단계에서 근거·출처 대조에 쓸 참고 자료(번호=프롬프트 번호)
+  let ctx='';  // 참조 확정 후 buildAnswerCtx로 조립(근거 우선순위 단일 프롬프트)
   let _hasRefs=false;
   if(ragEnabled&&refDocs.length){
     try{
@@ -1890,7 +2067,7 @@ async function generateAnswer(q,ragPromise,stats){
         if(refs.length){
           // [2026-10-05] 자동 습득 지식은 출처를 명시 — 센티널 지시(단일)는 그대로 두고 인라인 태그로만
           // 신중 판단을 유도한다(지시 문장 추가는 이중 지시 회귀 위험이 있어 금지).
-          ctx+='\n[참고 자료]\n'+refs.map((r,i)=>(i+1)+'. '+(r.origin==='auto'?'(자동 학습·검증 전) ':'')+r.text.slice(0,300)).join('\n');
+          _refsUsed=refs;
           if(stats){stats.ragRefs=refs.length;stats.ragTop=+(refs[0].score||0).toFixed(3);if(refs.some(r=>r.origin==='auto'))stats.ragAuto=true}
           _hasRefs=true;
         }
@@ -1899,45 +2076,61 @@ async function generateAnswer(q,ragPromise,stats){
     // [2026-10-05 v2] RAG 미스 정직 거절 — 참고자료가 아예 없으면(검색 실패·예산 초과 포함)
     // LLM을 아예 돌리지 않고 한계를 밝힌다(사용자 지시). 참조가 '있어도' 무관한 청크일 수 있어서
     // (점수 분리 불가 실측) 그 판정은 위 센티널 지시로 LLM에 맡기고, 토큰이 나오면 아래에서 교체.
-    if(!_hasRefs){
-      // [2026-10-07 사용자 지시] refs 0 = 거절이 아니라 파라메트릭 직답 기회 — 일반 지식 질문은
-      // 로컬 LLM이 바로 답하고, 사내 고유 사실만 습득 경로로 보낸다. 파라메트릭에서 모르면 아래
-      // 센티널 판정이 RAG_MISS_MSG로 되돌려 습득 흐름이 그대로 이어진다(안전망 이중).
-      if(parametricAnswerable(q)){
-        if(stats)stats.parametric=true;
-        // [2026-10-07 v10 사용자 지시] 2순위 파라메트릭 할루시네이션 조건 강화 — 시의성 정보(최신
-        // 뉴스·시세·날씨·출시일·통계)는 학습 컷 이후 변했을 수 있으므로 로컬 파라메트릭이 답지 않게
-        // 명시. 이런 질문은 센티널 → rag-miss → 클라우드 습득(3순위) 경로로 넘어간다.
-        ctx='당신은 발표 중이며 청중의 일반 지식 질문에 답합니다. 참고 자료가 없으니 당신이 학습한 일반 지식 범위에서만 간결하게 답하세요(2~3문장). 규칙: 널리 알려진 확실한 사실만 답하고, 수치·날짜·버전은 확실할 때만 말하며, 최신 뉴스·시세·날씨·출시일·통계처럼 시의성이 있는 정보는 학습 시점 이후 변했을 수 있으니 답지 말고, 이 발표·회사 내부 사실(인원·실적·일정·계약)은 절대 지어내지 말고, 확신이 없으면 다른 말 없이 정확히 '+NO_ANSWER_TOKEN+' 토큰만 출력하세요.\n[슬라이드] '+(s?s.title:'')+'\n[질문] '+q;
-      }else{
-        if(stats){stats.ragMiss=true;stats.engine='rag-miss'}
-        return RAG_MISS_MSG;
-      }
+    // [2026-10-13 사용자 지시] 참조 0건이어도 일반 상식 질문은 LLM 판단 경로로 보낸다(단일 프롬프트가
+    // 근거 우선순위를 처리). 사내·발표 고유 사실 질문만 여기서 즉시 거절 — 일반 지식으로 지어낼 수 없는 영역.
+    if(!_hasRefs&&!parametricAnswerable(q)){
+      if(stats){stats.ragMiss=true;stats.engine='rag-miss'}
+      return RAG_MISS_MSG;
     }
+    if(!_hasRefs&&stats)stats.parametric=true;
   }
+  ctx=buildAnswerCtx(q,s,_refsUsed);
   let ans='',engine='';
   // [2026-10-07 사용자 지시] 최신성 질문은 클라우드 LLM 우선(로컬 학습 컷 한계) — 실패 시 기존 로컬 폴백.
   const wantsLatest=LATEST_RE.test(q);
   if(stats&&wantsLatest)stats.latestRouted=true;
-  if(scriptEngine==='openai'||wantsLatest){
-    const _t0=Date.now();
-    try{const r=await fetch(OPENAI_SCRIPT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));ans=(j.content||'').trim();if(ans)engine='openai-script'}catch(e){if(stats)stats.errors.push('script:'+((e&&e.message)||'').slice(0,40))}
-    if(stats)stats.scriptMs=Date.now()-_t0;
-  }
-  if(!ans){
-    const _t0=Date.now();
-    try{const r=await fetch(LOCAL_LLM,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:ctx}]})});const j=await r.json().catch(()=>({}));ans=(j.message&&j.message.content||'').trim();if(ans)engine='local-llm'}catch(e){if(stats)stats.errors.push('llm:'+((e&&e.message)||'').slice(0,40))}
-    if(stats)stats.llmMs=Date.now()-_t0;
-  }
+  // [2026-10-13] LLM 1회 호출(OpenAI 우선 설정 또는 최신성 → 실패 시 로컬 폴백) — 재판정에서 재사용
+  const callLLM=async(c)=>{
+    let a='',e='';
+    if(scriptEngine==='openai'||wantsLatest){
+      const _t0=Date.now();
+      try{const r=await fetch(OPENAI_SCRIPT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:c}]})});const j=await r.json().catch(()=>({}));a=(j.content||'').trim();if(a)e='openai-script'}catch(er){if(stats)stats.errors.push('script:'+((er&&er.message)||'').slice(0,40))}
+      if(stats)stats.scriptMs=(stats.scriptMs||0)+Date.now()-_t0;
+    }
+    if(!a){
+      const _t0=Date.now();
+      try{const r=await fetch(LOCAL_LLM,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:c}]})});const j=await r.json().catch(()=>({}));a=(j.message&&j.message.content||'').trim();if(a)e='local-llm'}catch(er){if(stats)stats.errors.push('llm:'+((er&&er.message)||'').slice(0,40))}
+      if(stats)stats.llmMs=(stats.llmMs||0)+Date.now()-_t0;
+    }
+    return{a,e};
+  };
+  // 판정: LLM 거절(센티널·서술)·근거 검증 실패면 사유를 돌려준다 — 진단 로그(rawAns/verifyWhy)로 다음 실측에서 원인 확인
+  const judge=(raw)=>{
+    if(raw.includes(NO_ANSWER_TOKEN))return{ok:false,why:'LLM NO_ANSWER'};
+    if(isRefusalAnswer(raw))return{ok:false,why:'서술형 거절/너무 짧음'};
+    const v=verifyAnswer(q,raw,_refsUsed,s);
+    return v.ok?v:{ok:false,why:v.why,source:v.source};
+  };
+  let _r=await callLLM(ctx);ans=_r.a;engine=_r.e;
   if(!ans)ans='죄송합니다, 발표 후 더 자세히 답변드리겠습니다.';
-  // [2026-10-05 v2] 센티널 판정 — LLM이 근거 없음을 토큰으로 선언하면 정직 거절 멘트로 교체.
-  // 참조 점수로는 관련/무관 구분이 불가(0.376 vs 0.374 실측)하므로 이 판정이 거절의 본대.
-  // [2026-10-06] 서술형 거절도 동일 처리 — 토큰 누락 거절이 답변으로 흘러나오는 것을 막고
-  // rag-miss 흐름(습득→지연 답변)으로 승격시킨다.
-  if(ans.includes(NO_ANSWER_TOKEN)||isRefusalAnswer(ans)){
+  let _v=judge(ans);
+  // [2026-10-13 사용자 지시] "RAG에 있는 내용은 반드시 답변" — 검색된 첨부 문서 청크가 있는데 LLM이 보수적으로
+  // 거절했거나 검증이 막았다면 1회 재판정한다(질문과 관련된 내용이 자료에 있는지 자료만으로 다시 찾게 함).
+  // 근거 검증은 동일하게 적용되므로 할루시네이션 방어는 유지된다. 자료에 정말 없으면 재판정도 NO_ANSWER → 거절.
+  if(!_v.ok&&_refsUsed.some(r=>r.origin!=='auto')){
+    if(stats){stats.firstRaw=String(ans).replace(/\s+/g,' ').slice(0,140);stats.firstWhy=_v.why}
+    dbg('🔁 1차 판정 실패('+_v.why+') — 자료 중심 재판정: "'+String(ans).replace(/\s+/g,' ').slice(0,40)+'"');
+    const ctx2=ctx+'\n\n[재판정 지시] 위 [참고 자료]는 신뢰할 수 있는 내장 지식입니다. 질문의 핵심어(예: 약어·용어)와 같은 주제를 다루는 대목이 자료에 한 곳이라도 있으면, 그 대목만을 근거로 2~3문장으로 답하고 끝에 [근거:자료N]을 붙이세요. 자료 어디에도 해당 주제가 없을 때만 '+NO_ANSWER_TOKEN+' 토큰만 출력하세요.';
+    const r2=await callLLM(ctx2);
+    if(r2.a){const v2=judge(r2.a);if(v2.ok){ans=r2.a;engine=r2.e||engine;_v=v2;if(stats)stats.retried=true}else{ans=r2.a;_v=v2}}
+  }
+  if(stats){stats.source=_v.source||null;stats.verifyWhy=_v.ok?null:_v.why;if(!_v.ok)stats.rawAns=String(ans).replace(/\s+/g,' ').slice(0,140)}
+  if(!_v.ok){
+    dbg('🛡 답변 불가('+_v.why+') — 거절: "'+String(ans).replace(/\s+/g,' ').slice(0,50)+'"');
     if(stats){stats.ragMiss=true;stats.engine='rag-miss'}
     return RAG_MISS_MSG;
   }
+  ans=_v.prefix+_v.text;
   if(HANJA.test(ans))ans=ans.replace(/[一-鿿]+/g,'');
   if(stats){stats.engine=engine;stats.answerChars=ans.length}
   return ans;
@@ -2394,7 +2587,12 @@ async function handleInterruption(q,fromClosing){
   // 모든 질문 진입(waiting/confirming/closing/트리거 합침)이 거치는 단일 깔때기라 여기서 한 번 정리.
   _answeringQRaw=String(q).replace(/\s/g,'');  // [2026-10-07 v10] 원문 키 — 트리거 합침 원본 사본 대조용
   const _cq=cleanQuestionText(q);
-  if(_cq&&_cq!==q){dbg('🧹 질문 정리: "'+_cq.slice(0,30)+'"');q=_cq}
+  // [2026-10-13] 호명+트리거 보존 — "OpenAI에게 질문 있습니다"는 정리하면 호명 "OpenAI에게"만 남아
+  // (4자 이상이라 통과) 실질문으로 오인돼 엉뚱한 답을 했다. 원문이 질문 예고(ask)였고 정리 후 남은 게
+  // 호명 조각(…에게/한테/께/님/씨)뿐이면 정리하지 않고 원문을 유지해 아래 ask 분기("질문해 주세요")로 보낸다.
+  const _askOnly=detectIntent(q)==='ask'&&_cq&&/^[A-Za-z0-9가-힣.\s]{1,30}(에게|한테|께|님|씨|야|아)[,.!\s]*$/.test(_cq);
+  if(_askOnly)dbg('🙋 호명+질문 예고 — 질문 본문 아님, 대기 진입: "'+q.slice(0,24)+'"');
+  else if(_cq&&_cq!==q){dbg('🧹 질문 정리: "'+_cq.slice(0,30)+'"');q=_cq}
   _answeringQKey=String(q).replace(/\s/g,'');_answeringQAt=Date.now();  // [2026-10-07 v10] 재접수 폐기 기준 갱신(정리 본문 키)
   // [2026-10-06, 사용자 요청] 휘발성 질문 분기 — "오늘 날씨 어때요"류는 RAG·습득 없이 /api/volatile로
   // 즉시 답한다. 실측([rwz8]): rag-miss → 클라우드 만능답변이 conf 0.3 지식으로 오염(doc#33) → 지연
@@ -2496,7 +2694,7 @@ async function handleInterruption(q,fromClosing){
         }
       }catch(e){}
       if(!_recovered){
-        await speakUnified('죄송합니다. 아까 질문하신 내용은 관련 지식을 찾지 못했습니다.');
+        await speakUnified('죄송합니다. 아까 질문하신 내용은 관련 정보가 없어서 답변드릴 수 없었습니다.');
         if(gen!==_qaGen)return;
       }
     }
@@ -2551,7 +2749,7 @@ async function handleInterruption(q,fromClosing){
     ans=await Promise.race([answerPromise,new Promise(r=>setTimeout(()=>r(_SENT),5000))]);
   }
   const answer=(typeof ans==='string'&&ans)?ans:'죄송합니다, 발표 후 더 자세히 답변드리겠습니다.';
-  qa.textContent+='\n\n💡 '+(stats.ragMiss?'관련 지식이 아직 없습니다. 발표를 진행하는 동안 에이전트가 찾아보고 답변드리겠습니다.':answer.slice(0,200));
+  qa.textContent+='\n\n💡 '+(stats.ragMiss?NO_INFO_MSG+' 발표를 진행하는 동안 관련 자료를 찾아보겠습니다.':answer.slice(0,200));
   // [2026-10-05] "AI 답변 검색중…"을 답변 TTS 구간에 다시 띄우지 않는다 — 실발표에서 TTS가
   // 늦어지면 이 표시가 60초+ 떠 있어 무한루프처럼 보였던 것(실측 로그). 검색은 이미 끝났고
   // 답변 텍스트는 화면에 있으므로 상태 문구만 바꾼다.
@@ -2562,7 +2760,7 @@ async function handleInterruption(q,fromClosing){
   stats.answerTtsMs=Date.now()-_at0;
   hideSearchIndicator();  // 표시기 잔존 방어 — 어떤 경로로 켜졌든 확인 멘트 전엔 닫혀 있어야 한다
 
-  qaFlushLog({state:'answer',q:String(q).slice(0,300),ragMs:stats.ragMs??null,scriptMs:stats.scriptMs??null,llmMs:stats.llmMs??null,engine:stats.engine||null,ragRefs:stats.ragRefs??null,ragTimeout:!!stats.ragTimeout,fillers:stats.fillers,answerChars:stats.answerChars??answer.length,answerTtsMs:stats.answerTtsMs??null,parametric:!!stats.parametric,latest:!!stats.latestRouted,textFallback:!stats.engine&&!stats.ragMs&&!stats.llmMs?false:undefined,errors:stats.errors});
+  qaFlushLog({state:'answer',q:String(q).slice(0,300),ragMs:stats.ragMs??null,scriptMs:stats.scriptMs??null,llmMs:stats.llmMs??null,engine:stats.engine||null,ragRefs:stats.ragRefs??null,ragTimeout:!!stats.ragTimeout,fillers:stats.fillers,answerChars:stats.answerChars??answer.length,answerTtsMs:stats.answerTtsMs??null,parametric:!!stats.parametric,latest:!!stats.latestRouted,textFallback:!stats.engine&&!stats.ragMs&&!stats.llmMs?false:undefined,errors:stats.errors,source:stats.source||null,verifyWhy:stats.verifyWhy||null,rawAns:stats.rawAns||null,firstRaw:stats.firstRaw||null,firstWhy:stats.firstWhy||null,retried:!!stats.retried});
   // [2026-10-05] Jev QA Router 섀도 관찰 — 기존 QA가 "다 끝난 뒤" 결과만 비동기 보고(지시서 §35).
   // await 없이 fire-and-forget, 실패 무시: 이 보고가 사용자 QA 결과에 개입할 경로가 구조적으로 없다.
   try{fetch('/ppt-agent/api/decision/observe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:String(q).slice(0,300),slideTitle:(slides[curSlideIdx]||{}).title||null,sessionMode:fromClosing?'closing_qa':'interrupt',rag:{count:stats.ragRefs??0,topScore:stats.ragTop??null,autoTop:!!stats.ragAuto},actual:{engine:stats.engine||null,ragMiss:!!stats.ragMiss,llmCalled:stats.engine==='openai-script'||stats.engine==='local-llm',responseMs:stats.scriptMs??null,ttsMs:stats.answerTtsMs??null}})}).catch(()=>{})}catch(e){}
@@ -2592,7 +2790,7 @@ async function handleInterruption(q,fromClosing){
     // closing 분기)하되, 즉석 멘트는 사과로 간다.
     if(fromClosing){
       setStatus('💬 관련 지식 미발견 — 사과 후 Q&A 계속');
-      await speakUnified('관련 지식을 찾지 못했습니다. 죄송합니다.');
+      await speakUnified(NO_INFO_MSG+' 죄송합니다.');
       if(gen!==_qaGen)return;
       qaState='closing_qa';setStatus('💬 더 질문 있으신가요?');
       await speakUnified('더 질문 있으신가요?');
@@ -2601,7 +2799,7 @@ async function handleInterruption(q,fromClosing){
       return;
     }
     setStatus('💬 관련 지식 보강 중 — 발표를 진행한 뒤 답변드리겠습니다');
-    await speakUnified('관련 지식이 아직 없습니다. 먼저 발표를 진행하고, 제 에이전트가 관련 지식을 찾아 답변드리겠습니다.');
+    await speakUnified(NO_INFO_MSG+' 먼저 발표를 진행하고, 관련 자료를 찾아 보강되면 다시 말씀드리겠습니다.');
     if(gen!==_qaGen)return;  // [2026-10-05 v9] 멘트 사이에 정지/새 인터럽트 — 낡은 인스턴스의 상태 기록 금지
     if(fromClosing){  // 종료 Q&A 중 미스 — 재개할 발표가 없으므로 closing 흐름으로 복귀
       qaState='closing_qa';setStatus('💬 더 질문 있으신가요?');
@@ -2733,7 +2931,7 @@ async function playSentenceStream(idx){
       // 프리캐시 문구라 즉시 재생된다.
       _deferQA.told=true;_deferQA=null;
       dbg('💬 습득 실패 마무리 — 섹션 경계에서 정직 통보');
-      await speakUnified('관련 지식을 찾지 못했습니다. 죄송합니다.');
+      await speakUnified(NO_INFO_MSG+' 죄송합니다.');
       if(gen!==_playGen||interrupted||!playing)return;
     }
     if(curSlideIdx<slides.length-1)await presentSlide(curSlideIdx+1);
