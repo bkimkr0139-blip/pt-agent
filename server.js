@@ -1636,6 +1636,69 @@ app.post(`${PREFIX}/api/decision/observe`, requireApiAuth, (req, res) => {
 // [2026-10-04] 클라이언트 재생 진단 수집 — 브라우저 dbgBox 내용을 서버 로그로 전송받아
 // "소리가 안 난다" 재현 시 원격으로 죽는 지점(TTS 응답/디코딩/재생차단/폴백)을 판별한다.
 // 1.5초 버퍼 묶음 + pagehide(sendBeacon) — 발표 종료 후 시연 사이트로 이동해도 유실되지 않게.
+// ── [2026-10-13] OpenAI TTS 검증 프록시 — "질문 있습니다→질문해 주세요"가 뭉개지거나 버벅대는 문제 ──
+// 측정: tts-1-hd는 같은 문구를 0.7~1.1s(뭉개짐), gpt-4o-mini-tts는 1.5~3.1s(속도 요동)로 읽고, 어느 쪽이든 결과를
+// 검증하지 않았다(로컬 TTS는 프록시가 길이·ASR로 검증). 이 엔드포인트가 ①생성 결과를 로컬 ASR로 되듣어 입력과 한글
+// 2-gram 재현율이 낮으면(뭉개짐·환청·잘림) 재생성 ②짧은 고정 문구(≤40자)는 검증 통과본을 디스크에 저장해 항상 같은
+// 음성·같은 속도로 즉시 재생(결정적). ASR 장애 시 fail-open. 클라이언트는 이 경로만 쓴다(n8n 직접 호출 폐지).
+const TTS_ASR_URL = process.env.ASR_URL || 'http://127.0.0.1:8323';
+const TTS_CACHE_DIR = path.join(__dirname, 'data', 'tts-cache');
+try { fs.mkdirSync(TTS_CACHE_DIR, { recursive: true }); } catch (_) {}
+const TTS_RECALL_MIN = 0.6, TTS_CACHE_RECALL = 0.8, TTS_MAX_TRIES = 3, TTS_PHRASE_MAX = 40;
+const hangulOnly = s => String(s || '').replace(/[^가-힣]/g, '');
+function ttsRecall(input, transcript) {
+  // ASR은 "아이오티"를 "IoT", "열 시"를 "10시"처럼 영문·숫자로 적는다 — 그 구간은 비교에서 빼야 정상 음성이 오탐되지 않는다.
+  // 입력 쪽 한글 중 ASR이 영문/숫자로 낸 부분의 길이만큼은 면제(전사의 영문·숫자 토큰 수 × 3자)로 보정한다.
+  const a = hangulOnly(input), b = hangulOnly(transcript);
+  if (a.length < 4) return 1;  // 너무 짧아 판정 불가
+  const grams = t => { const g = new Set(); for (let i = 0; i < t.length - 1; i++) g.add(t.slice(i, i + 2)); return g; };
+  const A = grams(a), B = grams(b); let hit = 0;
+  for (const g of A) if (B.has(g)) hit++;
+  const tok = (String(transcript || '').match(/[A-Za-z]+|\d+/g) || []).length;  // 영문·숫자 토큰 수
+  const exempt = Math.min(Math.floor(A.size * 0.4), tok * 4);                   // 토큰당 약 4개 2-gram(아이오티=3)까지 면제
+  return Math.min(1, hit / Math.max(1, A.size - exempt));
+}
+async function ttsAsrText(wav) {
+  try {
+    const fd = new FormData(); fd.append('data', new Blob([wav], { type: 'audio/wav' }), 'tts.wav');
+    const r = await fetch(TTS_ASR_URL + '/stt', { method: 'POST', body: fd, signal: AbortSignal.timeout(8000) });
+    const j = await r.json();
+    return j && j.ok === false ? null : String((j && j.text) || '');  // dropped(무음·너무 짧음)는 null=판정 불가
+  } catch (_) { return null; }
+}
+async function openaiTtsOnce(input, voice) {
+  const r = await fetch(`${N8N_BASE}/webhook/koen-openai-tts-bin`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input, voice, speed: 1 }), signal: AbortSignal.timeout(60000),
+  });
+  if (!r.ok) throw new Error('n8n HTTP ' + r.status);
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.length < 1000) throw new Error('응답 크기 이상 ' + buf.length);
+  return buf;
+}
+app.post(`${PREFIX}/api/tts-openai`, requireApiAuth, async (req, res) => {
+  const input = String((req.body && req.body.input) || '').trim().slice(0, 600);
+  const voice = String((req.body && req.body.voice) || 'nova').replace(/[^a-z_]/g, '').slice(0, 20) || 'nova';
+  if (!input) return res.status(400).json({ error: 'input 필요' });
+  if (!(req.user.role === 'admin' || Number(req.user.allow_openai == null ? 1 : req.user.allow_openai))) return res.status(403).json({ error: 'OpenAI 미허용 계정' });
+  const cacheable = input.length <= TTS_PHRASE_MAX;
+  const cfile = path.join(TTS_CACHE_DIR, crypto.createHash('sha1').update(voice + '\n' + input).digest('hex') + '.wav');
+  if (cacheable) { try { const b = fs.readFileSync(cfile); res.set({ 'Content-Type': 'audio/wav', 'X-TTS-Source': 'cache' }); return res.send(b); } catch (_) {} }
+  const t0 = Date.now(); let best = null, bestR = -1, lastErr = null;
+  for (let i = 0; i < TTS_MAX_TRIES; i++) {
+    let wav;
+    try { wav = await openaiTtsOnce(input, voice); } catch (e) { lastErr = e; continue; }
+    const tr = await ttsAsrText(wav);
+    const r = tr == null ? 1 : ttsRecall(input, tr);  // ASR 불가 → fail-open(통과)
+    if (r > bestR) { best = wav; bestR = r; }
+    if (r >= TTS_RECALL_MIN) break;
+    console.log(`[TTS-OPENAI 재생성] voice=${voice} try=${i + 1} recall=${r.toFixed(2)} input=${JSON.stringify(input.slice(0, 24))} heard=${JSON.stringify((tr || '').slice(0, 30))}`);
+  }
+  if (!best) return res.status(502).json({ error: 'tts 실패', message: String((lastErr && lastErr.message) || '').slice(0, 120) });
+  if (cacheable && bestR >= TTS_CACHE_RECALL) { try { fs.writeFileSync(cfile, best); } catch (_) {} }
+  res.set({ 'Content-Type': 'audio/wav', 'X-TTS-Source': 'gen', 'X-TTS-Recall': bestR.toFixed(2), 'X-TTS-Ms': String(Date.now() - t0) });
+  res.send(best);
+});
 app.post(`${PREFIX}/api/dbg`, requireApiAuth, (req, res) => {
   const lines = (req.body && Array.isArray(req.body.lines)) ? req.body.lines : [];
   if (lines.length) {
