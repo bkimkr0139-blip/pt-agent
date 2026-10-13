@@ -1644,7 +1644,10 @@ app.post(`${PREFIX}/api/decision/observe`, requireApiAuth, (req, res) => {
 const TTS_ASR_URL = process.env.ASR_URL || 'http://127.0.0.1:8323';
 const TTS_CACHE_DIR = path.join(__dirname, 'data', 'tts-cache');
 try { fs.mkdirSync(TTS_CACHE_DIR, { recursive: true }); } catch (_) {}
-const TTS_RECALL_MIN = 0.6, TTS_CACHE_RECALL = 0.8, TTS_MAX_TRIES = 3, TTS_PHRASE_MAX = 40;
+// [2026-10-13] "다른 질문 없으시면…"의 "다른"이 "가른"으로 뭉개진 실측(20회 중 1회, recall 0.9라 기존 0.6 기준을 통과 — 캐시에 영구 저장될 뻔함).
+// 고정 문구(캐시 대상)는 한 음절 오류도 허용하지 않는다 — ASR 전사의 한글이 입력과 완전 일치할 때까지 최대 5회 재생성하고,
+// 끝내 완전 일치가 없으면 최고 재현율(0.9 이상)만 캐시한다. 일반 문장은 재현율 0.75 이상.
+const TTS_RECALL_MIN = 0.75, TTS_CACHE_RECALL = 0.9, TTS_MAX_TRIES = 3, TTS_PHRASE_TRIES = 5, TTS_PHRASE_MAX = 40;
 const hangulOnly = s => String(s || '').replace(/[^가-힣]/g, '');
 function ttsRecall(input, transcript) {
   // ASR은 "아이오티"를 "IoT", "열 시"를 "10시"처럼 영문·숫자로 적는다 — 그 구간은 비교에서 빼야 정상 음성이 오탐되지 않는다.
@@ -1685,13 +1688,15 @@ app.post(`${PREFIX}/api/tts-openai`, requireApiAuth, async (req, res) => {
   const cfile = path.join(TTS_CACHE_DIR, crypto.createHash('sha1').update(voice + '\n' + input).digest('hex') + '.wav');
   if (cacheable) { try { const b = fs.readFileSync(cfile); res.set({ 'Content-Type': 'audio/wav', 'X-TTS-Source': 'cache' }); return res.send(b); } catch (_) {} }
   const t0 = Date.now(); let best = null, bestR = -1, lastErr = null;
-  for (let i = 0; i < TTS_MAX_TRIES; i++) {
+  const tries = cacheable ? TTS_PHRASE_TRIES : TTS_MAX_TRIES;
+  for (let i = 0; i < tries; i++) {
     let wav;
     try { wav = await openaiTtsOnce(input, voice); } catch (e) { lastErr = e; continue; }
     const tr = await ttsAsrText(wav);
     const r = tr == null ? 1 : ttsRecall(input, tr);  // ASR 불가 → fail-open(통과)
     if (r > bestR) { best = wav; bestR = r; }
-    if (r >= TTS_RECALL_MIN) break;
+    const exact = tr != null && hangulOnly(tr) === hangulOnly(input);
+    if (tr == null || (cacheable ? exact : r >= TTS_RECALL_MIN)) break;  // ASR 불가면 통과, 고정 문구는 완전 일치, 일반 문장은 재현율 기준
     console.log(`[TTS-OPENAI 재생성] voice=${voice} try=${i + 1} recall=${r.toFixed(2)} input=${JSON.stringify(input.slice(0, 24))} heard=${JSON.stringify((tr || '').slice(0, 30))}`);
   }
   if (!best) return res.status(502).json({ error: 'tts 실패', message: String((lastErr && lastErr.message) || '').slice(0, 120) });
