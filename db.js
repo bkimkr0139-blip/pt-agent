@@ -105,6 +105,21 @@ for (const col of [['origin', "TEXT NOT NULL DEFAULT 'manual'"], ['confidence', 
   if (!has) db.prepare('ALTER TABLE users ADD COLUMN allow_openai INTEGER NOT NULL DEFAULT 1').run();
 }
 
+// [2026-10-14 고도화 Phase 2] 청크 메타(JSON: title/section/slide_no/part)와 문서 프로젝트 필터 컬럼.
+// 기존 청크는 재임베딩 없이 본문 헤딩에서 메타를 백필한다(헤딩 파싱만 — 텍스트·임베딩 불변).
+{
+  const hasC = col => db.prepare('PRAGMA table_info(chunks)').all().some(c => c.name === col);
+  if (!hasC('meta')) db.prepare('ALTER TABLE chunks ADD COLUMN meta TEXT').run();
+  const hasD = col => db.prepare('PRAGMA table_info(documents)').all().some(c => c.name === col);
+  if (!hasD('project')) db.prepare('ALTER TABLE documents ADD COLUMN project TEXT').run();
+  const { metaFromText } = require('./lib/chunk');
+  const rows = db.prepare('SELECT id,text FROM chunks WHERE meta IS NULL').all();
+  if (rows.length) {
+    const up = db.prepare('UPDATE chunks SET meta=? WHERE id=?');
+    db.transaction(() => { for (const r of rows) up.run(JSON.stringify(metaFromText(r.text)), r.id); })();
+  }
+}
+
 // 최초 1회 마이그레이션 — 기존 users.json(있다면)을 그대로 가져옴. 같은 scrypt salt/hash를
 // 그대로 쓰므로 admin/bckim 계정 비밀번호 재설정 불필요.
 function migrateFromJsonIfNeeded() {

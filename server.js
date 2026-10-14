@@ -11,7 +11,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { db, hashPassword, newSalt } = require('./db');
-const { chunkText } = require('./lib/chunk');
+const { chunkText, chunkDoc, metaFromText } = require('./lib/chunk');
+const ragLib = require('./lib/rag');
 
 const DOC_STORAGE_QUOTA_BYTES = 500 * 1024 * 1024; // 유저당 저장 한도(문서+PPT 합산) — ponytail: 고정값, 운영하면서 조정
 
@@ -747,6 +748,8 @@ ${notice ? `<div class="msg ok">${esc(notice)}</div>` : ''}${err ? `<div class="
 <input type="hidden" name="id" value="${doc.id}">
 <label style="display:block;font-size:.78rem;color:#9a9ea8;margin:8px 0 4px">이름</label>
 <input name="name" value="${esc(doc.name)}" required style="width:460px;max-width:100%;padding:6px 8px;font-size:.8rem;background:#0d0f13;border:1px solid #2a2e38;border-radius:6px;color:#e8e8ea">
+<label style="display:block;font-size:.78rem;color:#9a9ea8;margin:12px 0 4px">프로젝트 (선택) — 여러 프로젝트 자료가 섞일 때 발표 화면의 '프로젝트 필터'와 일치하는 문서를 우선 검색합니다</label>
+<input name="project" value="${esc(doc.project || '')}" maxlength="40" placeholder="예: 서울시 스마트돌봄" style="width:320px;max-width:100%;padding:6px 8px;font-size:.8rem;background:#0d0f13;border:1px solid #2a2e38;border-radius:6px;color:#e8e8ea">
 <label style="display:block;font-size:.78rem;color:#9a9ea8;margin:12px 0 4px">내용 — 전문을 자유롭게 편집하세요. 저장 시 다시 청크·임베딩됩니다.</label>
 <textarea name="text" required rows="16" style="display:block;width:100%;box-sizing:border-box;padding:8px;font-size:.8rem;line-height:1.55;background:#0d0f13;border:1px solid #2a2e38;border-radius:6px;color:#e8e8ea">${esc(content)}</textarea>
 <div style="margin-top:10px"><button class="actBtn" type="submit" style="background:#2b5fd9">💾 저장·재임베딩</button>
@@ -1199,15 +1202,15 @@ function docCountChunks(docId) { return db.prepare('SELECT COUNT(*) v FROM chunk
 app.post(`${PREFIX}/api/docs`, requireApiAuth, async (req, res) => {
   const { name, text } = req.body;
   if (!name || !text) return res.status(400).json({ error: 'name과 text가 필요합니다.' });
-  const texts = chunkText(text);
+  const texts = chunkDoc(text);
   const now = new Date().toISOString();
-  const docId = db.prepare('INSERT INTO documents(user_id,name,is_primary,source_bytes,created_at) VALUES(?,?,0,?,?)')
-    .run(req.user.id, name, Buffer.byteLength(text, 'utf8'), now).lastInsertRowid;
-  const ins = db.prepare('INSERT INTO chunks(document_id,user_id,seq,text,embedding,char_count) VALUES(?,?,?,?,?,?)');
+  const docId = db.prepare('INSERT INTO documents(user_id,name,is_primary,source_bytes,created_at,project) VALUES(?,?,0,?,?,?)')
+    .run(req.user.id, name, Buffer.byteLength(text, 'utf8'), now, String(req.body.project || '').trim().slice(0, 40) || null).lastInsertRowid;
+  const ins = db.prepare('INSERT INTO chunks(document_id,user_id,seq,text,embedding,char_count,meta) VALUES(?,?,?,?,?,?,?)');
   let seq = 0;
-  for (const t of texts) {
+  for (const { text: t, meta } of texts) {
     const emb = await embedViaN8n(t);
-    if (emb) ins.run(docId, req.user.id, seq++, t, embToBuf(emb), t.length);
+    if (emb) ins.run(docId, req.user.id, seq++, t, embToBuf(emb), t.length, JSON.stringify(meta || {}));
   }
   logUsage(req.user.id, 'doc_upload', Buffer.byteLength(text, 'utf8'));
   res.json({ id: docId, name, chunkCount: seq, isPrimary: false });
@@ -1311,36 +1314,26 @@ app.post(`${PREFIX}/api/search`, requireApiAuth, async (req, res) => {
   const primaryIds = db.prepare('SELECT id FROM documents WHERE user_id=? AND is_primary=1').all(req.user.id).map(d => d.id);
   const autoIds = db.prepare("SELECT id FROM documents WHERE user_id=? AND origin='auto'").all(req.user.id).map(d => d.id);
   const scopeIds = primaryIds.length ? Array.from(new Set([...primaryIds, ...autoIds])) : null;
-  const rows = scopeIds
-    ? db.prepare(`SELECT c.text,c.embedding,c.document_id,d.name as doc_name,d.origin as origin,d.confidence as confidence FROM chunks c JOIN documents d ON d.id=c.document_id WHERE c.user_id=? AND c.document_id IN (${scopeIds.map(() => '?').join(',')})`).all(req.user.id, ...scopeIds)
-    : db.prepare(`SELECT c.text,c.embedding,c.document_id,d.name as doc_name,d.origin as origin,d.confidence as confidence FROM chunks c JOIN documents d ON d.id=c.document_id WHERE c.user_id=?`).all(req.user.id);
-  if (!rows.length) return res.json({ refs: [], suspect: null });
+  // [2026-10-14 고도화 Phase 2] Hybrid 검색 — Dense(임베딩) + BM25(어휘) 융합 + 특징 재랭커(lib/rag.js, 평가 하네스와 동일 함수).
+  const SEL = 'SELECT c.id,c.seq,c.text,c.embedding,c.meta,c.document_id,d.name as doc_name,d.origin as origin,d.confidence as confidence,d.project as project FROM chunks c JOIN documents d ON d.id=c.document_id WHERE c.user_id=?';
+  const rows0 = scopeIds
+    ? db.prepare(SEL + ` AND c.document_id IN (${scopeIds.map(() => '?').join(',')}) ORDER BY c.id`).all(req.user.id, ...scopeIds)
+    : db.prepare(SEL + ' ORDER BY c.id').all(req.user.id);
+  if (!rows0.length) return res.json({ refs: [], suspect: null });
   // [2026-10-06] 발음 교정 — noCorrect=1이면 클라이언트가 "아니요"로 확정해 원문으로 재검색하는 경로.
   const corr = noCorrect ? { q: String(query), suspect: null } : correctQuery(query, req.user.id);
   const qEmb = await embedViaN8n(corr.q);
   if (!qEmb) return res.json({ refs: [], suspect: corr.suspect });
-  // [2026-10-05 v9d] 신뢰도 랭킹 반영 — 자동 습득 문서의 conf(0.5/0.3)가 랭킹에 전혀 반영되지 않아
-  // 불확실(conf 0.3) 청크가 1차 문서와 동등 경쟁했다(실측 오염: 불만 원문·STT 잡음이 임베딩돼 RAG에 유입).
-  // 점수에 신뢰도 가중(1.0→×1.0, 0.5→×0.8, 0.3→×0.72)을 두고 컷 판정도 같은 가중 점수로 일관 적용.
-  // [2026-10-06] 어휘 가점 — 질문 2-gram이 청크 본문에 실제로 등장하면 최대 +25%(임베딩이
-  // 경계 점수인 "수행 실적"류 질문이 본문 어휘와 맞물려 정렬 안정화).
-  const qBg = bigramSet(corr.q);
-  const ranked = rows.map(r => {
-    let score = cosineSim(qEmb, bufToEmb(r.embedding)) * (0.6 + 0.4 * (r.confidence == null ? 1 : r.confidence));
-    const bg = bigramSet(r.text);
-    let hit = 0; for (const b of qBg) if (bg.has(b)) hit++;
-    score *= 1 + 0.25 * Math.min(1, hit / Math.max(1, qBg.size));
-    return { text: r.text, docId: r.document_id, docName: r.doc_name, score, origin: r.origin || 'manual', confidence: r.confidence == null ? 1 : r.confidence };
-  }).sort((a, b) => b.score - a.score);
-  // [2026-10-05] 커버리지 개선 — 이 임베딩 모델은 동일 도메인 한국어 텍스트에서 청크 간 배경 유사도
-  // 자체가 높다(실측: 무작위 쌍 중앙값 0.462, p90 0.641). 절대 컷 0.3은 관련 문서(top1 0.34)까지
-  // 간당간당 걸러내 5문항 중 1건만 매칭됐다. 상대 컷(top×0.85, 배경 수준과 무관하게 최상위 근처만
-  // 통과)에 낮은 절대 바닥(0.25, 완전 무관 질문 차단)을 함께 적용한다.
-  const top = ranked.length ? ranked[0].score : 0;
-  const cut = Math.max(0.25, top * 0.85);
-  const scored = ranked.slice(0, k || 3).filter(r => r.score >= cut);
+  const rows = rows0.map(r => {
+    let meta = {}; try { meta = r.meta ? JSON.parse(r.meta) : {}; } catch { /* 손상 메타는 빈 값 */ }
+    return { id: r.id, seq: r.seq, text: r.text, dense: cosineSim(qEmb, bufToEmb(r.embedding)), docId: r.document_id, docName: r.doc_name, origin: r.origin, confidence: r.confidence, project: r.project || '', meta };
+  });
+  const sig = rows0.length + ':' + rows0[rows0.length - 1].id + ':' + rows0.reduce((a, r) => a + r.id, 0);
+  const index = ragLib.getIndex('u' + req.user.id + (scopeIds ? ':p' : ':a'), sig, rows.map(r => ({ id: r.id, text: r.text })));
+  // 질문 2-gram 어휘 가점·신뢰도 가중·프로젝트 필터·BM25 융합은 rankChunks 안에서 일괄 적용된다.
+  const { refs: scored, trace } = ragLib.rankChunks(rows, { qText: corr.q, k: Math.min(8, Math.max(1, +k || 4)), project: String(req.body.project || '').slice(0, 40), index });
   logUsage(req.user.id, 'search_call', null);
-  res.json({ refs: scored, suspect: corr.suspect });
+  res.json({ refs: scored, suspect: corr.suspect, trace });
 });
 
 // ── 지식 자동 습득 폐루프 [2026-10-05, 사용자 요청] ──────────────────────────
@@ -1479,11 +1472,11 @@ async function acquireKnowledge(userId, q, opts = {}) {
     const full = ans;
     const docId = db.prepare('INSERT INTO documents(user_id,name,is_primary,source_bytes,created_at,origin,confidence) VALUES(?,?,0,?,?,?,?)')
       .run(userId, name, Buffer.byteLength(full, 'utf8'), new Date().toISOString(), 'auto', uncertain ? CONF_AUTO_UNCERTAIN : CONF_AUTO).lastInsertRowid;
-    const ins = db.prepare('INSERT INTO chunks(document_id,user_id,seq,text,embedding,char_count) VALUES(?,?,?,?,?,?)');
+    const ins = db.prepare('INSERT INTO chunks(document_id,user_id,seq,text,embedding,char_count,meta) VALUES(?,?,?,?,?,?,?)');
     let seq = 0;
-    for (const t2 of chunkText(full)) {
+    for (const { text: t2, meta } of chunkDoc(full)) {
       const emb = await embedViaN8n(t2);
-      if (emb) ins.run(docId, userId, seq++, t2, embToBuf(emb), t2.length);
+      if (emb) ins.run(docId, userId, seq++, t2, embToBuf(emb), t2.length, JSON.stringify(meta || {}));
     }
     if (!seq) { db.prepare('DELETE FROM documents WHERE id=?').run(docId); return { ok: false, reason: 'embed-fail' }; }
     const conf = uncertain ? CONF_AUTO_UNCERTAIN : CONF_AUTO;
@@ -1572,11 +1565,11 @@ app.post(`${PREFIX}/admin/knowledge/add`, requireAdmin, async (req, res) => {
   const conf = { high: CONF_MANUAL, mid: CONF_AUTO, low: CONF_AUTO_UNCERTAIN }[req.body.level] || CONF_MANUAL;
   const docId = db.prepare('INSERT INTO documents(user_id,name,is_primary,source_bytes,created_at,origin,confidence) VALUES(?,?,0,?,?,?,?)')
     .run(req.user.id, name, Buffer.byteLength(text, 'utf8'), new Date().toISOString(), 'manual', conf).lastInsertRowid;
-  const ins = db.prepare('INSERT INTO chunks(document_id,user_id,seq,text,embedding,char_count) VALUES(?,?,?,?,?,?)');
+  const ins = db.prepare('INSERT INTO chunks(document_id,user_id,seq,text,embedding,char_count,meta) VALUES(?,?,?,?,?,?,?)');
   let seq = 0;
-  for (const t of chunkText(text)) {
+  for (const { text: t, meta } of chunkDoc(text)) {
     const emb = await embedViaN8n(t);
-    if (emb) ins.run(docId, req.user.id, seq++, t, embToBuf(emb), t.length);
+    if (emb) ins.run(docId, req.user.id, seq++, t, embToBuf(emb), t.length, JSON.stringify(meta || {}));
   }
   knowLedger({ ts: new Date().toISOString(), user: req.user.username, q: name, docId, confidence: conf, uncertain: false, chars: text.length, ms: 0, source: 'manual' });
   res.send(adminPage(`"${name}" 추가 완료 — ${seq}청크 임베딩, 신뢰도 ${conf}.`, 'knowledge', { knowUid: req.user.id }));
@@ -1602,14 +1595,14 @@ app.post(`${PREFIX}/admin/knowledge/update`, requireAdmin, async (req, res) => {
   // 1) 재임베딩 선완료 — 전부 성공해야 치환 진행(중간 실패 시 기존 청크 보존)
   const fresh = [];
   try {
-    for (const t of chunkText(text)) { const emb = await embedViaN8n(t); if (emb) fresh.push([t, emb]); }
+    for (const { text: t, meta } of chunkDoc(text)) { const emb = await embedViaN8n(t); if (emb) fresh.push([t, emb, meta]); }
   } catch { /* fresh 비어 아래 분기에서 안내 */ }
   if (!fresh.length) return res.send(knowledgeEditPage(doc, content, null, '임베딩 실패 — 기존 내용이 유지됐습니다. n8n 게이트웨이 상태를 확인한 뒤 다시 시도하세요.'));
   db.transaction(() => {
-    db.prepare('UPDATE documents SET name=?, source_bytes=?, confidence=? WHERE id=?').run(name, Buffer.byteLength(text, 'utf8'), CONF_MANUAL, id);
+    db.prepare('UPDATE documents SET name=?, source_bytes=?, confidence=?, project=? WHERE id=?').run(name, Buffer.byteLength(text, 'utf8'), CONF_MANUAL, String(req.body.project || '').trim().slice(0, 40) || null, id);
     db.prepare('DELETE FROM chunks WHERE document_id=?').run(id);
-    const ins = db.prepare('INSERT INTO chunks(document_id,user_id,seq,text,embedding,char_count) VALUES(?,?,?,?,?,?)');
-    fresh.forEach(([t, emb], i) => ins.run(id, doc.user_id, i, t, embToBuf(emb), t.length));
+    const ins = db.prepare('INSERT INTO chunks(document_id,user_id,seq,text,embedding,char_count,meta) VALUES(?,?,?,?,?,?,?)');
+    fresh.forEach(([t, emb, meta], i) => ins.run(id, doc.user_id, i, t, embToBuf(emb), t.length, JSON.stringify(meta || {})));
   })();
   // 2) 자동 문서의 이름 변경 = 원질문과의 연결 해제 — 같은 질문이 재습득되지 않도록 금지 기록
   if ((doc.origin || 'manual') === 'auto') {
@@ -1776,6 +1769,7 @@ app.post(`${PREFIX}/api/qa-log`, requireApiAuth, (req, res) => {
     source: b.source || null, verifyWhy: b.verifyWhy ? String(b.verifyWhy).slice(0, 80) : null,
     rawAns: b.rawAns ? String(b.rawAns).slice(0, 160) : null, firstRaw: b.firstRaw ? String(b.firstRaw).slice(0, 160) : null,
     firstWhy: b.firstWhy ? String(b.firstWhy).slice(0, 80) : null, retried: !!b.retried,
+    rag: (b.rag && typeof b.rag === 'object' && JSON.stringify(b.rag).length < 1500) ? b.rag : null, tierFiltered: b.tierFiltered ?? 0,  // [2026-10-14] dense/BM25/융합/재랭크 trace
     conv: (b.conv && typeof b.conv === 'object' && JSON.stringify(b.conv).length < 1500) ? b.conv : null,  // [2026-10-14] Conversation Manager 로그(대화행위·재작성·메모리·발표 위치)
     errors: Array.isArray(b.errors) ? b.errors.slice(0, 5) : [],
     events: Array.isArray(b.events) ? b.events.slice(0, 20) : [] };

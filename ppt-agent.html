@@ -394,6 +394,10 @@ body.fs .main{height:100vh;height:100dvh}
       <div class="setRow" style="margin:0"><span class="setLbl" style="min-width:auto">사용 여부</span>
         <button class="setBtn on" id="ragOn" onclick="setRagEnabled(true)">✅ 켜짐</button>
         <button class="setBtn" id="ragOff" onclick="setRagEnabled(false)">⛔ 꺼짐</button></div>
+      <div class="setRow" style="margin:0" title="여러 프로젝트 자료가 함께 들어 있을 때, 이 프로젝트로 지정된 문서를 우선 검색합니다(비우면 전체). 질문에 다른 프로젝트 이름을 말하면 그 문서도 참조합니다.">
+        <span class="setLbl" style="min-width:auto">프로젝트 필터</span>
+        <input id="projFilter" type="text" maxlength="40" placeholder="예: 서울시 스마트돌봄 (비우면 전체)" style="flex:1;min-width:0;padding:6px 8px;border-radius:8px;border:1px solid var(--bd,#444);background:transparent;color:inherit;font-size:.8rem"
+          oninput="try{localStorage.setItem('ppt_agent_project',this.value.trim())}catch(e){}"></div>
       <div id="refDocList" style="width:100%;max-height:140px;overflow-y:auto;font-size:.78rem;color:var(--mut)">
         <p style="margin:4px 0;color:var(--mut)">없음 — 업로드 화면이나 아래 버튼으로 추가</p>
       </div>
@@ -590,9 +594,10 @@ async function loadDocsFromServer(){
 // /api/search 쪽으로 그대로 옮겨감(doc.isPrimary 플래그 기준).
 async function searchRef(q,k=3,opts){
   // [2026-10-06] 서버가 {refs,suspect} 객체를 반환(발음 교정 suspect 전달). 구배열(낡은 탭↔서버 버전차)도 호환.
-  try{const j=await apiJson('/ppt-agent/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,k,noCorrect:opts&&opts.noCorrect?1:undefined})});
+  let project='';try{project=localStorage.getItem('ppt_agent_project')||''}catch(e){}
+  try{const j=await apiJson('/ppt-agent/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,k,noCorrect:opts&&opts.noCorrect?1:undefined,project:project||undefined})});
     if(Array.isArray(j))return{refs:j,suspect:null};
-    return{refs:j.refs||[],suspect:j.suspect||null};
+    return{refs:j.refs||[],suspect:j.suspect||null,trace:j.trace||null};
   }catch(e){return{refs:[],suspect:null}}
 }
 async function loadRefDocs(files){
@@ -2016,6 +2021,7 @@ function isRefusalAnswer(a){
 // 로컬 LLM도 파라미터에 일반 상식이 있으니, 할루시네이션 방지 게이트(센티널+거절 판정)를 유지한 채
 // 일반 지식 질문은 로컬 LLM이 곧바로 답한다. 사내·발표자료 고유 사실로 보이는 질문만 기존
 // rag-miss(습득) 경로로 보낸다. LLM이 모르면 센티널이 RAG_MISS_MSG로 되돌려 습득 흐름은 유지.
+const OFFICIAL_Q_RE=/(계약|일정|스케줄|비용|예산|금액|인원|실적|매출|납기|기간|담당자|연봉|조직도)/;
 const INTERNAL_SCOPE_RE=/(우리|저희|사내|내부|임직원|연봉|조직|고객사|수행\s?실적|실적|매출|계약|일정|인원)/;
 function parametricAnswerable(q){
   if(INTERNAL_SCOPE_RE.test(q))return false;  // 사내 고유 사실 가능성 — LLM 파라미터에 없는 영역, 습득 경로 담당
@@ -2299,11 +2305,12 @@ async function generateAnswer(q,ragPromise,stats){
       // 단 예산(RAG_BUDGET_MS) 초과 시 참고자료 없이 진행 — "검색하느라 답변이 안 나오는" 실측
       // 지연을 끊는다. 초과 여부는 stats.ragTimeout으로 기록해 폐루프에서 회귀 추적.
       const _rt0=Date.now();
-      const _rs=await Promise.race([ragPromise||searchRef(q,3),new Promise(r=>setTimeout(()=>r(null),RAG_BUDGET_MS))]);
+      const _rs=await Promise.race([ragPromise||searchRef(q,4),new Promise(r=>setTimeout(()=>r(null),RAG_BUDGET_MS))]);
       // [2026-10-06] searchRef가 {refs,suspect} 반환(발음 교정) — 구배열(낡은 탭↔서버 버전차)도 호환 정규화
       let refs=_rs===null?null:(Array.isArray(_rs)?_rs:(_rs.refs||[]));
       const _suspect=_rs&&!Array.isArray(_rs)?(_rs.suspect||null):null;
       if(stats&&_suspect)stats.pronSuspect=_suspect;
+      if(stats&&_rs&&_rs.trace)stats.ragTrace=_rs.trace;  // [2026-10-14] dense/BM25/융합/재랭크/최종 청크 — qa_log에 적재
       // [2026-10-06, 사용자 요청] 발음 확인 1회 — ASR 오타 교정 suspect가 붙었고 라이브 질문 흐름이면
       // "혹시 '~' 말씀이신가요?"라고 한 번 확인한다. "아니요"면 교정 없이 원문 질의로 재검색.
       // 무응답 타임아웃이면 교정 검색을 그대로 믿고 진행한다(방해 최소화).
@@ -2312,6 +2319,8 @@ async function generateAnswer(q,ragPromise,stats){
         if(ok===false){dbg('🗣 발음 확인 "아니요" — 교정 없이 재검색');refs=(await searchRef(q,3,{noCorrect:true})).refs;if(stats)stats.pronRecheck=true}
         else if(ok===true){if(stats)stats.pronConfirmed=true}
       }
+      // [2026-10-14 자료 계층] Tier C(AI 자동 습득·검증 전)는 참고용 — 계약·일정·비용·인원 같은 공식 사실 질문에는 쓰지 않는다(관리자 승인=신뢰도 1.0 → Tier B 승격 후 사용).
+      if(refs&&refs.length&&OFFICIAL_Q_RE.test(q)){const _n=refs.length;refs=refs.filter(r=>r.tier!=='C');if(stats&&refs.length<_n){stats.tierFiltered=_n-refs.length;dbg('🔒 공식 사실 질문 — 검증 전 자동 지식(Tier C) '+stats.tierFiltered+'건 제외')}}
       if(refs===null){if(stats){stats.ragTimeout=true;stats.ragMs=Date.now()-_rt0}}
       else{
         if(stats)stats.ragMs=Date.now()-_rt0;
@@ -2999,7 +3008,7 @@ async function handleInterruption(q,fromClosing){
   // B0) [2026-10-05] RAG 검색을 질문 접수 즉시 시작 — 추임새·LLM과 병렬. 기존엔 답변 생성
   // 내부에서 직렬(RAG 끝 → LLM 시작)이라 검색 지연이 답변 전체를 밀었다.
   const convPromise=ConvMgr.prepare(q);stats.convPromise=convPromise;  // [2026-10-14] 대화행위 분류·후속질문 재작성(규칙 판정, 필요 시 로컬 LLM ≤3초)
-  const ragPromise=(ragEnabled&&refDocs.length)?convPromise.then(c=>searchRef(c.query,3)).catch(e=>{stats.errors.push('rag:'+((e&&e.message)||'').slice(0,60));return[]}):Promise.resolve([]);
+  const ragPromise=(ragEnabled&&refDocs.length)?convPromise.then(c=>searchRef(c.query,4)).catch(e=>{stats.errors.push('rag:'+((e&&e.message)||'').slice(0,60));return[]}):Promise.resolve([]);
 
   // A) 즉시: 설정 음성 추임새 (프리캐시 — 0ms 시작). [2026-10-05 v3] 정적 추임새로 통일 —
   // 동적 되묻기("…맞을까요?")는 프리캐시 불가 + GPU 경합 시 6초 예산 미스 → 침묵(실측 [b0tm]).
@@ -3050,7 +3059,7 @@ async function handleInterruption(q,fromClosing){
   hideSearchIndicator();  // 표시기 잔존 방어 — 어떤 경로로 켜졌든 확인 멘트 전엔 닫혀 있어야 한다
 
   const _tid=ConvMgr.record(_cv,stats.ragMiss?NO_INFO_MSG:answer,{unanswered:!!stats.ragMiss});
-  qaFlushLog({state:'answer',conv:Object.assign(ConvMgr.logView(_cv),{turn:_tid}),q:String(q).slice(0,300),ragMs:stats.ragMs??null,scriptMs:stats.scriptMs??null,llmMs:stats.llmMs??null,engine:stats.engine||null,ragRefs:stats.ragRefs??null,ragTimeout:!!stats.ragTimeout,fillers:stats.fillers,answerChars:stats.answerChars??answer.length,answerTtsMs:stats.answerTtsMs??null,parametric:!!stats.parametric,latest:!!stats.latestRouted,textFallback:!stats.engine&&!stats.ragMs&&!stats.llmMs?false:undefined,errors:stats.errors,source:stats.source||null,verifyWhy:stats.verifyWhy||null,rawAns:stats.rawAns||null,firstRaw:stats.firstRaw||null,firstWhy:stats.firstWhy||null,retried:!!stats.retried});
+  qaFlushLog({state:'answer',conv:Object.assign(ConvMgr.logView(_cv),{turn:_tid}),rag:stats.ragTrace||null,tierFiltered:stats.tierFiltered||0,q:String(q).slice(0,300),ragMs:stats.ragMs??null,scriptMs:stats.scriptMs??null,llmMs:stats.llmMs??null,engine:stats.engine||null,ragRefs:stats.ragRefs??null,ragTimeout:!!stats.ragTimeout,fillers:stats.fillers,answerChars:stats.answerChars??answer.length,answerTtsMs:stats.answerTtsMs??null,parametric:!!stats.parametric,latest:!!stats.latestRouted,textFallback:!stats.engine&&!stats.ragMs&&!stats.llmMs?false:undefined,errors:stats.errors,source:stats.source||null,verifyWhy:stats.verifyWhy||null,rawAns:stats.rawAns||null,firstRaw:stats.firstRaw||null,firstWhy:stats.firstWhy||null,retried:!!stats.retried});
   // [2026-10-05] Jev QA Router 섀도 관찰 — 기존 QA가 "다 끝난 뒤" 결과만 비동기 보고(지시서 §35).
   // await 없이 fire-and-forget, 실패 무시: 이 보고가 사용자 QA 결과에 개입할 경로가 구조적으로 없다.
   try{fetch('/ppt-agent/api/decision/observe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:String(q).slice(0,300),slideTitle:(slides[curSlideIdx]||{}).title||null,sessionMode:fromClosing?'closing_qa':'interrupt',rag:{count:stats.ragRefs??0,topScore:stats.ragTop??null,autoTop:!!stats.ragAuto},actual:{engine:stats.engine||null,ragMiss:!!stats.ragMiss,llmCalled:stats.engine==='openai-script'||stats.engine==='local-llm',responseMs:stats.scriptMs??null,ttsMs:stats.answerTtsMs??null}})}).catch(()=>{})}catch(e){}
@@ -3530,7 +3539,7 @@ document.addEventListener('fullscreenchange',()=>{
 
 function togglePanel(){panelOpen=!panelOpen;document.getElementById('sidePanel').classList.toggle('open',panelOpen);document.getElementById('slideWrap').classList.toggle('panelOpen',panelOpen);requestAnimationFrame(()=>{if(curSlideIdx>=0&&slides[curSlideIdx])renderSlide(curSlideIdx);syncAnnoCanvas&&syncAnnoCanvas()})}
 document.getElementById('btnPanel').onclick=togglePanel;
-function openSettings(){document.getElementById('settingsModal').classList.add('show');updatePPTList();updateRefDocList();document.getElementById('speedSlider').value=ttsSpeed;document.getElementById('speedVal').textContent=ttsSpeed.toFixed(2)+'x';updateSpeedTotalTime()}
+function openSettings(){document.getElementById('settingsModal').classList.add('show');try{document.getElementById('projFilter').value=localStorage.getItem('ppt_agent_project')||''}catch(e){}updatePPTList();updateRefDocList();document.getElementById('speedSlider').value=ttsSpeed;document.getElementById('speedVal').textContent=ttsSpeed.toFixed(2)+'x';updateSpeedTotalTime()}
 function closeSettings(){document.getElementById('settingsModal').classList.remove('show')}
 document.getElementById('btnSettings').onclick=openSettings;
 document.getElementById('settingsModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeSettings()});
