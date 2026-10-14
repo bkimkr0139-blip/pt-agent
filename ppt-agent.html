@@ -2204,7 +2204,7 @@ const ConvMgr=(()=>{
     if(REF_RE.test(t))return true;
     const n=t.replace(/\s/g,'').length;
     if(n<=10&&SHORT_Q_RE.test(t))return true;
-    return turns.length>0&&(n<=16||ELLIPSIS_RE.test(t))&&n<=30;
+    return turns.length>0&&(n<=9||ELLIPSIS_RE.test(t))&&n<=30;  // [2026-10-14] 길이만 짧은(≤16자) 독립 질문에 직전 주제를 덧붙이던 오재작성 제거("수기로 기록해야 될 내용은 뭘까요"→"센스 알람에서…" 실측) — 생략형·지시어만
   }
   // FOLLOW_UP은 지시어·생략형일 때만 — 길이만 짧은 독립 질문("IoT가 뭐예요")은 QUESTION 유지(직전 답변을 근거로 끌어오지 않기 위해)
   function classify(q){
@@ -2429,7 +2429,8 @@ async function generateAnswer(q,ragPromise,stats){
       // 무응답 타임아웃이면 교정 검색을 그대로 믿고 진행한다(방해 최소화).
       if(_suspect&&stats&&stats.confirmSuspect){
         const ok=await pronConfirmAsk(_suspect);
-        if(ok===false){dbg('🗣 발음 확인 "아니요" — 교정 없이 재검색');refs=(await searchRef(q,3,{noCorrect:true})).refs;if(stats)stats.pronRecheck=true}
+        if(ok===null&&_suspect.rule==='fuzzy'){dbg('🗣 발음 확인 무응답 — 어휘 퍼지 교정은 신뢰하지 않고 원문으로 재검색');refs=(await searchRef(q,3,{noCorrect:true})).refs;if(stats)stats.pronRecheck=true}  // [2026-10-14] "수기로"→"위기로" 오교정이 무응답으로 확정돼 엉뚱한 답이 나온 실측 — 사전(dict) 교정만 무응답 시 신뢰
+        else if(ok===false){dbg('🗣 발음 확인 "아니요" — 교정 없이 재검색');refs=(await searchRef(q,3,{noCorrect:true})).refs;if(stats)stats.pronRecheck=true}
         else if(ok===true){if(stats)stats.pronConfirmed=true}
       }
       // [2026-10-14 자료 계층] Tier C(AI 자동 습득·검증 전)는 참고용 — 계약·일정·비용·인원 같은 공식 사실 질문에는 쓰지 않는다(관리자 승인=신뢰도 1.0 → Tier B 승격 후 사용).
