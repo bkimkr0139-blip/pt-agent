@@ -10,7 +10,7 @@ const sb={__log:log,console:{log(){},warn(){},error(){},info(){}},setTimeout,cle
   sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},speechSynthesis:stub,Audio:stub,Image:stub,fetch:async()=>({ok:false,json:async()=>({}),text:async()=>''}),requestAnimationFrame(){},addEventListener(){},removeEventListener(){}};
 for(const k of Object.getOwnPropertyNames(globalThis))if(!(k in sb)&&!['process','global','require','module'].includes(k)){try{sb[k]=globalThis[k]}catch(_){}}
 sb.window=sb;sb.self=sb;sb.globalThis=sb;vm.createContext(sb);
-vm.runInContext(script+'\n;globalThis.__h={enterHold,get qaState(){return qaState},set qaState(v){qaState=v},set stt(v){_sttLastEvt=v},resume:resumeFromBackgroundPause,set playing(v){playing=v},RESUME_RE,detectIntent,judgeAddressee,isDiscussCue,DISCUSS_DONE_RE};',sb);
+vm.runInContext(script+'\n;globalThis.__h={enterHold,get qaState(){return qaState},set qaState(v){qaState=v},set stt(v){_sttLastEvt=v},resume:resumeFromBackgroundPause,set playing(v){playing=v},RESUME_RE,detectIntent,judgeAddressee,isDiscussCue,isSkipRequest,skip:skipAnswerAndContinue,DISCUSS_DONE_RE};',sb);
 vm.runInContext('speakUnified=async(t)=>{__log.push("say:"+t)};resumeFromInterrupted=()=>{__log.push("RESUME")};qaLog=()=>{};',sb);
 const H=sb.__h,sleep=ms=>new Promise(r=>setTimeout(r,ms));let bad=0;const chk=(n,c)=>{console.log((c?'ok  ':'FAIL')+' '+n);if(!c)bad++};
 (async()=>{
@@ -20,6 +20,8 @@ const H=sb.__h,sleep=ms=>new Promise(r=>setTimeout(r,ms));let bad=0;const chk=(n
   chk('토의 종료 인식',H.DISCUSS_DONE_RE.test('토의 다 했습니다')&&H.DISCUSS_DONE_RE.test('이제 얘기 끝났어요'));
   // 수신자 판정(LLM 없음 → 규칙 폴백): 사람끼리 vs AI에게
   for(const [t,buf,w] of [['과장님은 어떻게 생각하세요',[],'HUMAN'],['이거 내일까지 되겠어?',[],'HUMAN'],['이 사업의 KPI는 무엇인가요',[],'AGENT'],['그럼 예산은 얼마나 잡을까',[{t:'일정은 어떻게 하지',ts:Date.now()}],'HUMAN']])chk('수신자 '+t+' → '+w,(await H.judgeAddressee(t,buf))===w);
+  for(const [t,w] of [['아 알겠고요',1],['아 네 이해했어요 그 정도 설명이면 되겠네요 다음으로 넘어가시죠',1],['충분히 알겠습니다',1],['다음으로 넘어가시죠',1],['됐어요 계속 진행해 주세요',1],['다음 슬라이드로 넘어갑시다',1],
+    ['알겠는데 하나 더 질문이 있어요',0],['이해가 안 돼요 다시 설명해 주세요',0],['다음 슬라이드는 뭐예요',0],['그 정도 비용이면 괜찮을까요',0],['KPI는 어떻게 측정하나요',0]])chk('건너뛰기 '+t+' → '+(w?'예':'아니오'),H.isSkipRequest(t)===!!w);
   H.playing=true;
   H.stt=Date.now();H.enterHold('test');
   chk('A1 HOLD 진입',H.qaState==='holding');
