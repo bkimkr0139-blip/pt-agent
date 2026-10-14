@@ -891,7 +891,7 @@ function detectIntent(text){
   // [2026-10-05] STT 무공백/변형형 보강 — "질문있습니다"(띄어쓰기 없음·STT 빈출), "질문 하나
   // 있습니다", "질문드리겠습니다", "여쭤볼 게 있습니다", "물어볼게요"가 ask 대신 intent로 분류돼
   // LLM이 "질문있습니다"를 질문 본문으로 착각해 답변하던 문제 수정.
-  if(/(질문.{0,4}있|질문할게|질문드릴|질문드리|질문\s*좀|질문해도|물어봐도|물어볼게|여쭤(봐도|볼)|궁금한\s*게|궁금한\s*것)/.test(text)&&text.length<30)return'ask';
+  if(/(질문.{0,4}있|질문\s*이?\s*었습|질문입니다|질문할게|질문드릴|질문드리|질문\s*좀|질문해도|물어봐도|물어볼게|여쭤(봐도|볼)|궁금한\s*게|궁금한\s*것)/.test(text)&&text.length<30)return'ask';
   // [2026-10-05 v9] 불만/재촉 — "질문 안 받나요?"를 의문형 종결(나요) 탓에 질문 '본문'으로 착각해
   // LLM이 말도 안 되게 문자 답변한 실측([i5c0] 12:19 qa_log). 이런 메타 발화는 질문 모드 진입 트리거로 본다.
   if(/질문.{0,6}(안\s*받|못\s*받|받지\s*않|왜\s*안)|질문\s*안\s*되나|(대답|답변).{0,6}(왜\s*안|안\s*하|못\s*하)/.test(text)&&text.length<30)return'ask';  // [2026-10-05 v9c] "물어봤는데 왜 대답 안 하죠"도 불만으로 — 질문 본문 오인해 불만 문장이 지식으로 습득 오염된 실측([i5el] +104.7s) 차단
@@ -3296,9 +3296,9 @@ async function resumeFromInterrupted(){
   unduckVol();  // [2026-10-06 사용자 지정] 발화 끝나고 발표 재개 — 볼륨 원복
   interrupted=false;
   document.getElementById('qaBox').style.display='none';
-  setStatus('▶ 발표 재개 — 끊긴 문장부터 다시');
-  // 끊긴 문장을 처음부터 재발화 (curSentenceIdx 유지)
-  playSentenceStream(curSentenceIdx);
+  setStatus('▶ 발표 재개 — 끊긴 문장의 다음부터');
+  // [2026-10-14 사용자 지시] 끊긴 문장은 다시 읽지 않고 다음 문장부터 재개(마지막 문장이면 playSentenceStream이 다음 슬라이드로 넘긴다)
+  playSentenceStream(curSentenceIdx+1);
 }
 function pauseForBackgroundTalk(){
   if(!playing||interrupted)return;
