@@ -1776,6 +1776,7 @@ app.post(`${PREFIX}/api/qa-log`, requireApiAuth, (req, res) => {
     source: b.source || null, verifyWhy: b.verifyWhy ? String(b.verifyWhy).slice(0, 80) : null,
     rawAns: b.rawAns ? String(b.rawAns).slice(0, 160) : null, firstRaw: b.firstRaw ? String(b.firstRaw).slice(0, 160) : null,
     firstWhy: b.firstWhy ? String(b.firstWhy).slice(0, 80) : null, retried: !!b.retried,
+    conv: (b.conv && typeof b.conv === 'object' && JSON.stringify(b.conv).length < 1500) ? b.conv : null,  // [2026-10-14] Conversation Manager 로그(대화행위·재작성·메모리·발표 위치)
     errors: Array.isArray(b.errors) ? b.errors.slice(0, 5) : [],
     events: Array.isArray(b.events) ? b.events.slice(0, 20) : [] };
   try { fs.appendFileSync(path.join(__dirname, 'eval', 'qa_log.jsonl'), JSON.stringify(rec) + '\n'); } catch (_) {}
