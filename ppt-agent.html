@@ -878,6 +878,9 @@ const INTENT_RE=/질문|잠깐|중지|멈춰|멈출|정지|잠시만|물어봐|�
 // ── 고도화 인텐트 감지 — 발화 유형별 4종 분류 ──
 // pause: 일시정지 요청 → "질문 있으신가요?" / ask: 질문 허락 → "네, 질문해 주세요"
 // question: 직접 질문 (질문어/의문형 종결) → 즉시 답변 / intent: 기타 키워드
+// [2026-10-14] 청중끼리 토의·대화 선언 단서 — STT 오인("토의"→"토이")도 포함
+function isDiscussCue(t){return /(우리\s*끼리|저희\s*끼리|토의|토이\s*(좀|를|하)|논의|의논|상의|회의\s*(좀|를|하)|(얘기|이야기)\s*(좀|를|하|먼저)|(잠시|잠깐)\s*(후|뒤)에|따로\s*(얘기|이야기|상의))/.test(t)}
+const DISCUSS_DONE_RE=/((토의|논의|상의|얘기|이야기|회의)\s*(다|끝|마쳤|마칠|했)|다\s*했(어요|습니다|어)|끝났(어요|습니다|어)|정리\s*(됐|되었|끝)|이제\s*됐)/;
 function detectIntent(text){
   if(!text||text.length<3)return'none';
   if(isHall(text))return'none';
@@ -886,7 +889,13 @@ function detectIntent(text){
   // eval/issues.jsonl에 쌓여 다음 개선 세션의 입력이 된다. 상태를 건드리지 않는 최우선 명령.
   if(/(문제|오류|버그|에러)[^가-힣]{0,6}(기록|메모|남겨)|기록해\s*(줘|주실)|이거\s*기록/.test(text)&&text.length<40)return'issue';
   // 1. 일시정지 — "잠깐만요", "잠시만요", "멈춰주세요", "stop"
-  if(/^(잠깐|잠시|멈춰|멈출|중지|정지|그만|스톱|stop|wait|hold)/i.test(text)&&text.length<20)return'pause';
+  // [2026-10-14] "아 잠깐만요 우리끼리 토의 좀 하고요"처럼 추임새 선두·긴 발화·토의 선언도 일시정지(기존: 20자 미만+문두만 → INTENT_RE '잠깐'에 걸려 질문으로 접수돼 거절·지식습득 오염).
+  // 단 "잠깐만요 질문 있습니다"는 일시정지가 아니라 질문 예고(ask)로 넘긴다.
+  {const _tx=text.replace(/^(아+|어+|음+|저기|자|그|네)[\s,.]*/,'');
+   if(/^(잠깐|잠시|멈춰|멈출|중지|정지|그만|스톱|stop|wait|hold)/i.test(_tx)){
+     if(/(질문.{0,4}있|질문할게|질문드릴|질문드리|질문\s*좀|여쭤(봐도|볼)|물어(봐도|볼게))/.test(_tx)&&_tx.length<40)return'ask';
+     if(_tx.length<20||(isDiscussCue(_tx)&&_tx.length<50))return'pause';
+   }}
   // 2. 질문 허락/예고 — "질문 있습니다", "질문해도 될까요?", "궁금한게 있어서요"
   // [2026-10-05] STT 무공백/변형형 보강 — "질문있습니다"(띄어쓰기 없음·STT 빈출), "질문 하나
   // 있습니다", "질문드리겠습니다", "여쭤볼 게 있습니다", "물어볼게요"가 ask 대신 intent로 분류돼
@@ -1905,11 +1914,25 @@ recognizer.onresult=e=>{
     // ── 청중 대화 지속 감지 후 일시정지 확인 대기 ──
     if(qaState==='holding'||qaState==='confirming_continue'){
       const _ask=qaState==='confirming_continue';
-      if(intent==='question'||intent==='ask'){
-        clearTimeout(_holdTimer);clearTimeout(_continueSilenceTimer);
-        qaState='answering';handleInterruption(t);return;
+      _holdBuf.push({t,ts:Date.now()});if(_holdBuf.length>8)_holdBuf.shift();
+      if(isDiscussCue(t)){_holdQuiet=HOLD_QUIET_DISCUSS_MS}
+      // 질문 예고 — 명시적으로 AI에게 질문하겠다는 말이므로 판정 없이 답변 흐름
+      if(intent==='ask'&&!isDiscussCue(t)){clearTimeout(_holdTimer);clearTimeout(_continueSilenceTimer);qaState='answering';handleInterruption(t);return}
+      // 토의 종료/재개 요청 — 대기 해제
+      if(RESUME_RE.test(t)||DISCUSS_DONE_RE.test(t)||(_ask&&POSITIVE_RE.test(t)&&intent!=='pause'&&!/잠깐|잠시|아직|아니|기다/.test(t))){resumeFromBackgroundPause();return}
+      // 질문처럼 보이는 발화 — AI에게 하는 질문인지, 청중끼리의 대화인지 맥락으로 판정한다(토의 선언이 있었으면 사람끼리로 우선 간주)
+      if((intent==='question'||intent==='intent')&&!isDiscussCue(t)){
+        // 판정 중에도 대기 타이머가 "다시 발표해도 될까요?"를 물어버리지 않게 즉시 연장
+        scheduleHoldCheck();
+        const _g=_qaGen,_buf=_holdBuf.slice(0,-1);
+        judgeAddressee(t,_buf).then(who=>{
+          if(_g!==_qaGen||(qaState!=='holding'&&qaState!=='confirming_continue'))return;
+          dbg('🧭 대기 중 발화 수신자 판정: '+who+' — "'+t.slice(0,24)+'"');qaLog('hold_judge',{who,t:t.slice(0,60)});
+          if(who==='AGENT'){clearTimeout(_holdTimer);clearTimeout(_continueSilenceTimer);qaState='answering';handleInterruption(t)}
+          else{if(qaState==='confirming_continue'){clearTimeout(_continueSilenceTimer);qaState='holding'}scheduleHoldCheck()}
+        });
+        return;
       }
-      if(RESUME_RE.test(t)||(_ask&&POSITIVE_RE.test(t)&&intent!=='pause'&&!/잠깐|잠시|아직|아니|기다/.test(t))){resumeFromBackgroundPause();return}
       // 그 밖의 발화 = 대화가 계속되는 중 → (확인 질문 뒤였다면 다시 대기로 돌아가) 조용해질 때까지 기다린다
       if(_ask){clearTimeout(_continueSilenceTimer);qaState='holding';dbg('⏸ 대화 지속 — 다시 대기(확인 질문 이후 발화)')}
       scheduleHoldCheck();
@@ -1934,7 +1957,7 @@ recognizer.onresult=e=>{
     if(intent==='pause'){
       // [2026-10-14 사용자 지시] "잠깐만요" → 발표 중단 후 말없이 대기(HOLD). 청중끼리 대화가 이어지는 동안은 계속 기다리고,
       // 대화가 멈추면 "다시 발표해도 될까요?"라고 한 번 묻는다. 질문이 오면 바로 답변한다.
-      enterHold('pause');
+      enterHold('pause',t);
       return;
     }
     if(intent==='ask'){
@@ -3309,9 +3332,36 @@ function pauseForBackgroundTalk(){
 // [2026-10-14 사용자 지시] 대화 대기(HOLD) — "잠깐만요"나 지속적인 배경 대화로 발표를 멈추면 말없이 기다린다.
 // 마지막 발화로부터 HOLD_QUIET_MS 동안 조용해지면 "다시 발표해도 될까요?"를 묻고, 10초 무응답이거나 재개 요청("계속 발표해 주세요",
 // "계속 진행합시다", "네")이면 이어간다. 확인 질문 뒤에 다시 대화가 이어지면 HOLD로 되돌아간다.
-let _holdTimer=null;
-const HOLD_QUIET_MS=5000;
-function enterHold(why){
+let _holdTimer=null,_holdBuf=[],_holdQuiet=6000;
+const HOLD_QUIET_MS=6000,HOLD_QUIET_DISCUSS_MS=12000;  // 토의 선언("우리끼리 토의 좀")이 있으면 더 길게 기다린다
+// 대기 중 발화의 수신자 판정 — 규칙(사람 호칭·반말·토의 단서) 후 로컬 LLM(2.5초), 실패 시 규칙 폴백
+const HUMAN_CUE_RE=/(과장|팀장|부장|대리|사원|차장|이사|선생|교수|주무관|위원|님[,\s]|님$)|(야|니|냐|지|어|래|게|걸)\??$|(할까|어때|그치|맞지)\??$/;
+async function judgeAddressee(t,buf){
+  const formal=/(요|까요|나요|니까|습니까|죠|십니까)\s*[?？]?$/.test(t);
+  const human=HUMAN_CUE_RE.test(t)&&!formal;
+  const chat=(buf||[]).filter(x=>Date.now()-x.ts<30000).map(x=>x.t);
+  const sl=(slides||[])[Math.max(0,curSlideIdx)]||{};
+  let who=null;
+  try{
+    const p='당신은 발표 중인 AI 발표자입니다. 청중이 "잠깐만요"라며 발표를 멈추게 한 뒤의 대화입니다.\n'
+      +'마지막 발화가 "AI 발표자에게 하는 질문"인지, "청중끼리의 대화·토의"인지 판정하세요.\n'
+      +'AGENT: 발표 내용·사업에 대해 AI에게 묻는 질문, AI/발표자를 부르는 말.\n'
+      +'HUMAN: 사람 호칭(과장님·팀장님 등)이 있거나 반말, 의견 교환·일정·업무 협의, "우리끼리", 혼잣말, 잡담, 발표와 무관한 말, 앞선 대화에 이어지는 말.\n'
+      +'[현재 슬라이드] '+(sl.title||'')+'\n'
+      +(chat.length?'[대기 중 앞선 대화] '+chat.slice(-4).join(' / ')+'\n':'')
+      +'[마지막 발화] '+t+'\n답(AGENT 또는 HUMAN 한 단어):';
+    const call=fetch(LOCAL_LLM,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:p}]})})
+      .then(r=>r.json()).then(j=>{const o=String(j&&j.message&&j.message.content||'').toUpperCase();return/AGENT/.test(o)&&!/HUMAN/.test(o)?'AGENT':(/HUMAN/.test(o)?'HUMAN':null)});
+    who=await Promise.race([call,new Promise(r=>setTimeout(()=>r(null),2500))]);
+  }catch(e){who=null}
+  if(who)return who;
+  // 폴백 — 사람 호칭·반말이면 HUMAN, 앞선 잡담이 이어지는 중이면 HUMAN, 그 밖의 존댓말 의문형은 AGENT
+  if(human||/(과장|팀장|부장|대리|사원|차장|이사|선생|교수|주무관|위원)\S*/.test(t)||/님(은|도|이|께|,|\s|$)/.test(t))return'HUMAN';  // 사람 호칭은 존댓말이어도 청중끼리
+  if(chat.length&&!formal)return'HUMAN';
+  return formal?'AGENT':'HUMAN';
+}
+function enterHold(why,text){
+  _holdBuf=[];_holdQuiet=(text&&isDiscussCue(text))?HOLD_QUIET_DISCUSS_MS:HOLD_QUIET_MS;
   if(audioEl){audioEl.pause();audioEl=null}
   try{speechSynthesis.cancel()}catch(e){}
   ttsSpeaking=false;interrupted=true;
@@ -3320,15 +3370,15 @@ function enterHold(why){
   document.getElementById('qaBox').textContent='⏸ 대화가 끝나면 이어서 발표합니다';
   setStatus('⏸ 대기 중 — 말씀이 끝나면 이어서 발표합니다');
   qaState='holding';
-  dbg('⏸ 대기(HOLD) 진입 — '+why);qaLog('hold',{why});
+  dbg('⏸ 대기(HOLD) 진입 — '+why+(text&&isDiscussCue(text)?' (토의 선언)':''));qaLog('hold',{why,discuss:!!(text&&isDiscussCue(text))});
   scheduleHoldCheck();
 }
 function scheduleHoldCheck(){
   clearTimeout(_holdTimer);
-  const wait=Math.max(500,HOLD_QUIET_MS-(Date.now()-_sttLastEvt));
+  const wait=Math.max(500,_holdQuiet-(Date.now()-_sttLastEvt));
   _holdTimer=setTimeout(async()=>{
     if(qaState!=='holding')return;
-    if(Date.now()-_sttLastEvt<HOLD_QUIET_MS){scheduleHoldCheck();return}  // 아직 말하는 중 — 계속 대기
+    if(Date.now()-_sttLastEvt<_holdQuiet){scheduleHoldCheck();return}  // 아직 말하는 중 — 계속 대기
     qaState='confirming_continue';
     setStatus('⏸ 다시 발표해도 될까요?');
     const g=_qaGen;

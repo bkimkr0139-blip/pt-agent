@@ -10,12 +10,16 @@ const sb={__log:log,console:{log(){},warn(){},error(){},info(){}},setTimeout,cle
   sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},speechSynthesis:stub,Audio:stub,Image:stub,fetch:async()=>({ok:false,json:async()=>({}),text:async()=>''}),requestAnimationFrame(){},addEventListener(){},removeEventListener(){}};
 for(const k of Object.getOwnPropertyNames(globalThis))if(!(k in sb)&&!['process','global','require','module'].includes(k)){try{sb[k]=globalThis[k]}catch(_){}}
 sb.window=sb;sb.self=sb;sb.globalThis=sb;vm.createContext(sb);
-vm.runInContext(script+'\n;globalThis.__h={enterHold,get qaState(){return qaState},set qaState(v){qaState=v},set stt(v){_sttLastEvt=v},resume:resumeFromBackgroundPause,set playing(v){playing=v},RESUME_RE,detectIntent};',sb);
+vm.runInContext(script+'\n;globalThis.__h={enterHold,get qaState(){return qaState},set qaState(v){qaState=v},set stt(v){_sttLastEvt=v},resume:resumeFromBackgroundPause,set playing(v){playing=v},RESUME_RE,detectIntent,judgeAddressee,isDiscussCue,DISCUSS_DONE_RE};',sb);
 vm.runInContext('speakUnified=async(t)=>{__log.push("say:"+t)};resumeFromInterrupted=()=>{__log.push("RESUME")};qaLog=()=>{};',sb);
 const H=sb.__h,sleep=ms=>new Promise(r=>setTimeout(r,ms));let bad=0;const chk=(n,c)=>{console.log((c?'ok  ':'FAIL')+' '+n);if(!c)bad++};
 (async()=>{
   for(const t of ['계속 발표해 주세요','계속 진행합시다','발표 계속해주세요','이어서 진행해 주세요'])chk('재개 요청 인식: '+t,H.RESUME_RE.test(t));
   chk('잠깐만요 = pause',H.detectIntent('잠깐만요')==='pause');
+  for(const [t,w] of [['아 잠깐만요 우리끼리 좀 토이 좀 하고요','pause'],['잠깐만요 우리끼리 토의 좀 하고요','pause'],['잠깐만요','pause'],['잠깐만요 질문 있습니다','ask'],['어 잠시만요 저희끼리 상의 좀 할게요','pause']])chk('의도 '+t+' → '+w,H.detectIntent(t)===w);
+  chk('토의 종료 인식',H.DISCUSS_DONE_RE.test('토의 다 했습니다')&&H.DISCUSS_DONE_RE.test('이제 얘기 끝났어요'));
+  // 수신자 판정(LLM 없음 → 규칙 폴백): 사람끼리 vs AI에게
+  for(const [t,buf,w] of [['과장님은 어떻게 생각하세요',[],'HUMAN'],['이거 내일까지 되겠어?',[],'HUMAN'],['이 사업의 KPI는 무엇인가요',[],'AGENT'],['그럼 예산은 얼마나 잡을까',[{t:'일정은 어떻게 하지',ts:Date.now()}],'HUMAN']])chk('수신자 '+t+' → '+w,(await H.judgeAddressee(t,buf))===w);
   H.playing=true;
   H.stt=Date.now();H.enterHold('test');
   chk('A1 HOLD 진입',H.qaState==='holding');
