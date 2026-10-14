@@ -501,8 +501,8 @@ let playing=false,interrupted=false,audioEl=null,recognizer=null,sttActive=false
 let _bgTalkTimes=[];
 const BG_TALK_WINDOW_MS=10000,BG_TALK_THRESHOLD=3;  // 10초 내 3회 감지되면 대화 지속으로 판단
 let _continueSilenceTimer=null;
-const CONTINUE_SILENCE_MS=6000;  // 6초간 조용해지면 자동 재개
-const RESUME_RE=/계속\s*(발표|진행|해|하세요|해주세요)|발표\s*(계속|이어)|이어서\s*(해|진행|주세요)|다시\s*시작/;
+const CONTINUE_SILENCE_MS=10000;  // [2026-10-14] 확인 질문 뒤 10초 무응답이면 자동 재개
+const RESUME_RE=/계속\s*(발표|진행|해|하세요|해주세요|합시다|가|이어)|발표\s*(계속|이어|해\s*주|해주|재개|합시다)|이어서\s*(해|진행|주세요)|다시\s*시작|진행\s*(해\s*주|해주|합시다|하세요)|재개\s*(해|합시다|하세요)/;
 // [2026-09-29] "계속 발표할까요?"에 대한 가장 흔한 대답("네"/"넵"/"알겠습니다"/"좋아요")은 RESUME_RE의
 // 동사형 구문과 안 맞아 무시되던 문제 — Q&A 확인(confirming 상태)에 이미 쓰던 긍정 판별을 공유.
 const POSITIVE_RE=/네|예|넵|넹|좋아|맞아|응|계속|진행|없|괜찮|고마워|감사|충분|알겠|오케이|됐|ok/i; // [2026-10-05] 됐(습니다/어요) 추가 — "답이 됐어요"가 재개 응답으로 안 먹던 것 수정
@@ -533,7 +533,7 @@ let promptCache={};
 const CLOSING_ASK='제가 준비한 발표 자료는 여기까지입니다. 질문 있으신가요?';
 const CLOSING_END='더 이상 질문이 없으시면 제 발표는 마치겠습니다. 경청해 주셔서 감사합니다.';
 const CLOSING_WAIT_MS=6000,CLOSING_AFTER_ANSWER_MS=10000;  // 첫 질문 대기 / 답변 뒤 추가 질문 대기(사용자 음성이 감지되면 연장)
-const CACHED_PHRASES=['질문해 주세요.','어떤 부분을 말씀하시는 건지 조금 더 구체적으로 말씀해 주시겠어요?','이 내용은 뒤쪽 장표에서도 다시 설명드리겠습니다. 발표를 이어가겠습니다.','앞서 말씀드린 내용과 연결되는 부분입니다. 이어서 설명드리겠습니다.','질문하신 부분까지 설명드렸습니다. 이어서 말씀드리겠습니다.','혹시 다른 질문 없으시면 계속 발표해도 될까요?','말씀해 주세요.','좋은 질문입니다.','잠시 확인해 보겠습니다.','질문이 없으시면 계속 진행하겠습니다.','더 질문 있으신가요?','질문 있으신가요?','답변 드리겠습니다.','확인해 보겠습니다.','알겠습니다, 잠시만요.','바로 답변 드릴게요.','관련 내용을 찾아보고 있습니다. 잠시만 기다려 주세요.','자료를 확인 중입니다. 조금만 더 기다려 주세요.','문제를 기록했습니다.','계속 발표할까요?','관련 지식이 아직 없습니다.','먼저 발표를 진행하고, 제 에이전트가 관련 지식을 찾아 답변드리겠습니다.','답변은 화면에 표시되어 있습니다.','관련 지식을 찾지 못했습니다. 죄송합니다.','아직 관련 지식을 찾고 있습니다. 찾는 대로 말씀드리겠습니다.','관련 정보가 없어서 지금은 제가 답변드릴 수 없습니다.','관련 정보가 없어서 지금은 제가 답변드릴 수 없습니다. 죄송합니다.',CLOSING_ASK,CLOSING_END];  // [2026-10-05 v6.1] 지연 답변 통보 2구문(원인+계획 포함 — "무작정 답변 못 한다"고만 하지 않는다). 제안 멘트("조금 전에 질문하신 OOO에 대하여…")는 질문 내용을 담는 동적 문장이라 ready 시점에 개별 프리생성한다  // [2026-10-05 v2] "네," 접두 전부 제거 — 실측으로 "네,"로 시작하면 모델이 "네"에서 조기 EOS(프록시 REJECT→SPLIT→FAIL 8.6~19.8s, FAIL-FINAL로 캐시 영구 미스 → 질문해도 무음). 제거본은 0.5s 일률 1회 성공(15:4x 전수 실측). PLAIN_FILLERS 4종+시간벌기 추임새 2종+일시정지·확인 멘트+문제기록 확인 멘트+배경대화 재개 확인
+const CACHED_PHRASES=['질문해 주세요.','어떤 부분을 말씀하시는 건지 조금 더 구체적으로 말씀해 주시겠어요?','이 내용은 뒤쪽 장표에서도 다시 설명드리겠습니다. 발표를 이어가겠습니다.','앞서 말씀드린 내용과 연결되는 부분입니다. 이어서 설명드리겠습니다.','질문하신 부분까지 설명드렸습니다. 이어서 말씀드리겠습니다.','혹시 다른 질문 없으시면 계속 발표해도 될까요?','다시 발표해도 될까요?','말씀해 주세요.','좋은 질문입니다.','잠시 확인해 보겠습니다.','질문이 없으시면 계속 진행하겠습니다.','더 질문 있으신가요?','질문 있으신가요?','답변 드리겠습니다.','확인해 보겠습니다.','알겠습니다, 잠시만요.','바로 답변 드릴게요.','관련 내용을 찾아보고 있습니다. 잠시만 기다려 주세요.','자료를 확인 중입니다. 조금만 더 기다려 주세요.','문제를 기록했습니다.','계속 발표할까요?','관련 지식이 아직 없습니다.','먼저 발표를 진행하고, 제 에이전트가 관련 지식을 찾아 답변드리겠습니다.','답변은 화면에 표시되어 있습니다.','관련 지식을 찾지 못했습니다. 죄송합니다.','아직 관련 지식을 찾고 있습니다. 찾는 대로 말씀드리겠습니다.','관련 정보가 없어서 지금은 제가 답변드릴 수 없습니다.','관련 정보가 없어서 지금은 제가 답변드릴 수 없습니다. 죄송합니다.',CLOSING_ASK,CLOSING_END];  // [2026-10-05 v6.1] 지연 답변 통보 2구문(원인+계획 포함 — "무작정 답변 못 한다"고만 하지 않는다). 제안 멘트("조금 전에 질문하신 OOO에 대하여…")는 질문 내용을 담는 동적 문장이라 ready 시점에 개별 프리생성한다  // [2026-10-05 v2] "네," 접두 전부 제거 — 실측으로 "네,"로 시작하면 모델이 "네"에서 조기 EOS(프록시 REJECT→SPLIT→FAIL 8.6~19.8s, FAIL-FINAL로 캐시 영구 미스 → 질문해도 무음). 제거본은 0.5s 일률 1회 성공(15:4x 전수 실측). PLAIN_FILLERS 4종+시간벌기 추임새 2종+일시정지·확인 멘트+문제기록 확인 멘트+배경대화 재개 확인
 // [2026-10-05] RAG 미스 정직 거절 멘트 — 참고자료가 아예 없으면 LLM을 돌리지 않고 이대로 답변한다.
 // 사용자 지시: "로컬 LLM의 한계이므로 RAG에 없는 답변을 못한다는 점을 밝히도록". 약한 참조(스코어
 // 0.3 미만)는 기존대로 [주의] 프롬프트와 함께 LLM 답변을 유지 — 완전 미스만 거절로 전환.
@@ -1903,13 +1903,16 @@ recognizer.onresult=e=>{
       return;
     }
     // ── 청중 대화 지속 감지 후 일시정지 확인 대기 ──
-    if(qaState==='confirming_continue'){
+    if(qaState==='holding'||qaState==='confirming_continue'){
+      const _ask=qaState==='confirming_continue';
       if(intent==='question'||intent==='ask'){
+        clearTimeout(_holdTimer);clearTimeout(_continueSilenceTimer);
         qaState='answering';handleInterruption(t);return;
       }
-      if(RESUME_RE.test(t)||POSITIVE_RE.test(t)){resumeFromBackgroundPause();return}
-      // 대화가 계속됨 — 재개하지 않고 침묵 타이머만 리셋
-      scheduleContinueSilenceTimer();
+      if(RESUME_RE.test(t)||(_ask&&POSITIVE_RE.test(t)&&intent!=='pause'&&!/잠깐|잠시|아직|아니|기다/.test(t))){resumeFromBackgroundPause();return}
+      // 그 밖의 발화 = 대화가 계속되는 중 → (확인 질문 뒤였다면 다시 대기로 돌아가) 조용해질 때까지 기다린다
+      if(_ask){clearTimeout(_continueSilenceTimer);qaState='holding';dbg('⏸ 대화 지속 — 다시 대기(확인 질문 이후 발화)')}
+      scheduleHoldCheck();
       return;
     }
     // ── [2026-10-05 v9] 답변 재생 중 발화 유실 방지 — 실측 [i5c0]: 직전 질문("질문 안 받나요")의
@@ -1929,16 +1932,9 @@ recognizer.onresult=e=>{
     if(!playing||interrupted)return;
     // ── 발표 중 인텐트 처리 ──
     if(intent==='pause'){
-      // "잠깐만요" → 일시정지 + 맥락 맞는 질문 유도
-      if(audioEl){audioEl.pause();audioEl=null}
-      try{speechSynthesis.cancel()}catch(e){}
-      ttsSpeaking=false;interrupted=true;
-      document.getElementById('qaBox').style.display='block';
-      document.getElementById('qaBox').textContent='⏸ 일시정지';
-      setStatus('⏸ 일시정지 — 질문 있으신가요?');
-      qaState='waiting_question';
-      // [2026-10-05] 타이머는 멘트 재생 후부터 (ask 경로와 동일 — 재생 지연 시 창이 사라지던 문제)
-      speakUnified('질문 있으신가요?').then(()=>{if(qaState==='waiting_question')scheduleWaitQTimer()});
+      // [2026-10-14 사용자 지시] "잠깐만요" → 발표 중단 후 말없이 대기(HOLD). 청중끼리 대화가 이어지는 동안은 계속 기다리고,
+      // 대화가 멈추면 "다시 발표해도 될까요?"라고 한 번 묻는다. 질문이 오면 바로 답변한다.
+      enterHold('pause');
       return;
     }
     if(intent==='ask'){
@@ -3308,22 +3304,44 @@ async function resumeFromInterrupted(){
 }
 function pauseForBackgroundTalk(){
   if(!playing||interrupted)return;
+  enterHold('bgtalk');
+}
+// [2026-10-14 사용자 지시] 대화 대기(HOLD) — "잠깐만요"나 지속적인 배경 대화로 발표를 멈추면 말없이 기다린다.
+// 마지막 발화로부터 HOLD_QUIET_MS 동안 조용해지면 "다시 발표해도 될까요?"를 묻고, 10초 무응답이거나 재개 요청("계속 발표해 주세요",
+// "계속 진행합시다", "네")이면 이어간다. 확인 질문 뒤에 다시 대화가 이어지면 HOLD로 되돌아간다.
+let _holdTimer=null;
+const HOLD_QUIET_MS=5000;
+function enterHold(why){
   if(audioEl){audioEl.pause();audioEl=null}
   try{speechSynthesis.cancel()}catch(e){}
   ttsSpeaking=false;interrupted=true;
+  ConvMgr.st.pendingResume=false;
   document.getElementById('qaBox').style.display='block';
-  document.getElementById('qaBox').textContent='⏸ 대화가 계속되어 잠시 멈췄습니다';
-  setStatus('⏸ 계속 발표할까요?');
-  speakUnified('계속 발표할까요?');
-  qaState='confirming_continue';
-  scheduleContinueSilenceTimer();
+  document.getElementById('qaBox').textContent='⏸ 대화가 끝나면 이어서 발표합니다';
+  setStatus('⏸ 대기 중 — 말씀이 끝나면 이어서 발표합니다');
+  qaState='holding';
+  dbg('⏸ 대기(HOLD) 진입 — '+why);qaLog('hold',{why});
+  scheduleHoldCheck();
+}
+function scheduleHoldCheck(){
+  clearTimeout(_holdTimer);
+  const wait=Math.max(500,HOLD_QUIET_MS-(Date.now()-_sttLastEvt));
+  _holdTimer=setTimeout(async()=>{
+    if(qaState!=='holding')return;
+    if(Date.now()-_sttLastEvt<HOLD_QUIET_MS){scheduleHoldCheck();return}  // 아직 말하는 중 — 계속 대기
+    qaState='confirming_continue';
+    setStatus('⏸ 다시 발표해도 될까요?');
+    const g=_qaGen;
+    try{await speakUnified('다시 발표해도 될까요?')}catch(e){}
+    if(qaState==='confirming_continue'&&g===_qaGen)scheduleContinueSilenceTimer();  // 멘트 뒤부터 10초 창
+  },wait);
 }
 function scheduleContinueSilenceTimer(){
   clearTimeout(_continueSilenceTimer);
   _continueSilenceTimer=setTimeout(()=>{if(qaState==='confirming_continue')resumeFromBackgroundPause()},CONTINUE_SILENCE_MS);
 }
 function resumeFromBackgroundPause(){
-  clearTimeout(_continueSilenceTimer);
+  clearTimeout(_continueSilenceTimer);clearTimeout(_holdTimer);
   qaState='idle';
   resumeFromInterrupted();
 }
@@ -3722,7 +3740,7 @@ function setMicCmd(v){
   // [2026-10-04] qaBox 클릭 = 수동 "계속" — 발표가 어떤 이유로 멈춰도 클릭 한 번으로 재개
   const qb=document.getElementById('qaBox');
   if(qb){qb.style.cursor='pointer';qb.title='클릭하면 발표를 계속 진행합니다';
-    qb.addEventListener('click',()=>{if(qaState==='confirming_continue')resumeFromBackgroundPause();else if(interrupted&&playing)resumeFromInterrupted()});}
+    qb.addEventListener('click',()=>{if(qaState==='confirming_continue'||qaState==='holding')resumeFromBackgroundPause();else if(interrupted&&playing)resumeFromInterrupted()});}
 })();
 function setRagEnabled(v){ragEnabled=v;document.getElementById('ragOn').classList.toggle('on',v);document.getElementById('ragOff').classList.toggle('on',!v)}
 
@@ -3768,7 +3786,7 @@ slides.forEach((_,i)=>{_scriptChain=_scriptChain.then(()=>ensureScript(i)).catch
 await presentSlide(Math.max(curSlideIdx,0));
 }  // [2026-10-05] pregenPhrases 호출은 발표 '시작' 지점으로 이동 (아래 발표 종료 후 실행이던 호출은 발표 내내 캐시가 빈 원인이었다)
 function pausePresentation(){playing=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('일시정지');if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}  // [2026-10-04 v9] _audioFin 즉시 해제 — 120s 고아 감시자 방지
-function stopAll(){aiBusyEnd();playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);unduckVol();_deferQA=null;_deferPending=[];_deferAskedAt=0;_pendingQ=null;_qaGen++;_lastQ='';_answeringQKey='';_answeringQRaw='';_lastFinalKey='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring')qaState='idle';resolveDeferred(false);setStatus('정지')}  // [2026-10-07 v10] 재접수 폐기 키도 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
+function stopAll(){aiBusyEnd();playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);unduckVol();_deferQA=null;_deferPending=[];_deferAskedAt=0;_pendingQ=null;_qaGen++;_lastQ='';_answeringQKey='';_answeringQRaw='';_lastFinalKey='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring'||qaState==='holding'||qaState==='confirming_continue')qaState='idle';clearTimeout(_holdTimer);clearTimeout(_continueSilenceTimer);resolveDeferred(false);setStatus('정지')}  // [2026-10-07 v10] 재접수 폐기 키도 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
 // ── 마지막 슬라이드 발표 완료 → Q&A 시간 → URL 열기 ──
 let _closingTimer=null;
 function extractURL(){
