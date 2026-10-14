@@ -1,12 +1,13 @@
 # PPT 발표 에이전트 — 시스템 문서
 
-> 버전 v10.7 · 2026-10-14 · Mac Studio(맥스듀오) M3 Ultra 96GB 로컬 실행
+> 버전 v11.0 · 2026-10-14 · Mac Studio(맥스듀오) M3 Ultra 96GB 로컬 실행
 > 문서 업로드 → LLM 발표 스크립트·슬라이드 생성 → 로컬 음성(STT/LLM/TTS) 자동 발표 → 로그 감시·자동 복구 루프
 
 ## 0. 현재 작업 상태 — [2026-10-14 KST 기준]
 
 > 구현·적용 기술의 **전체 구성(LLM·STT·TTS·프롬프팅·RAG·사람다운 음성·검증 방법)은 별도 문서 「음성에이전트구성」**(이 탭의 🎙️ 서브탭 / ⬇️ 다운로드)에 정리돼 있다. 아래는 2026-10-13~14 세션의 변경 이력.
 
+- **음성 PT 에이전트 고도화 v11.0 (개발지시서 v1.0, Phase 1~4) [2026-10-14, 서버+클라이언트 — 서버 재시작+새로고침]**: 모델 교체 없이 **맥락·입력·검색**을 개선. ① **Conversation Manager(P0)** `ppt-agent.html`의 `ConvMgr` — 단기 대화 메모리(5턴)+세션 요약(8줄)+발표 메모리(현재 슬라이드·문장·중단 위치·설명한/곧 설명할 주제)+대화행위 분류(QUESTION/FOLLOW_UP/CLARIFICATION/COMPARE/DETAIL/SUMMARY/REPEAT/CORRECTION)+후속질문 재작성(지시어·생략형일 때만 로컬 LLM 1회 ≤3초, 규칙 폴백)+장표 참조("5페이지")+해석 불가 시 확인 질문+재개 문구 3종(프리캐시). `buildAnswerCtx`는 [발표 상태]/[발표 맥락]/[최근 대화]/[세션 요약]/[현재 질문]/[질문 해석]/[대화행위] 섹션 구조로 확장(기존 3순위 근거 규칙·`[[NO_ANSWER]]`·문장 단위 검증 유지). REPEAT/SUMMARY/FOLLOW_UP 계열은 직전 답변(이미 검증됨)을 근거 자료의 하나로 허용. ② **Hybrid RAG(P1)** `lib/rag.js` — Dense(임베딩)+BM25(한글 2-gram·영문/숫자 토큰) 융합(0.45/0.55)+특징 재랭커(타이브레이크)+프로젝트 필터(`documents.project`, 설정의 '프로젝트 필터', 타 프로젝트 문서 ×0.5 감쇠·명시 언급 시 해제)+자료 계층 A 공식/B 관리자 검증(신뢰도 1.0)/C 자동 습득(공식 사실 질문 — 계약·일정·비용·인원 등 — 에는 Tier C 제외), `lib/chunk.js` — 겹침 120자·헤딩 유지·표 행/목록 항목 보존·청크 메타(title/section/slide_no/part, `chunks.meta`). `/api/search`가 `chunk_id/slide_no/relevance/rerank_score/source_type/tier`와 `trace`(dense·BM25·융합·재랭크·최종)를 반환. ③ **서버 Streaming STT(P2)** `lib/stt_stream.js` + `/api/stt/{start,chunk,stop,health}` — 브라우저 16kHz PCM 100ms 청크 → 서버 VAD(speech_start/partial/final) → Qwen3-ASR(`stt_server.py`에 `context` 필드 추가) + PT 핫워드(슬라이드 제목·영문 약어+문서 어휘+발음 사전)로 편향·퍼지 보정, 철자 교정은 기존 "…를 말씀하신 건가요?" 확인 경로 재사용, 장애 시 재연결 2회→Web Speech 폴백(`stt_fallback_web` 로그). 설정 🎙 음성 인식 엔진 토글(기본 🌐 브라우저). WebSocket 대신 HTTP 청크 POST — frp→nginx 체인 무수정. ④ **평가**: `battery/`(conv_unit, conv_rewrite, rag_eval[100문항], stt_stream_eval, stt_hotword_unit, qa_e2e) — 실측값은 「음성에이전트구성」 §8. ⑤ 로그: qa_log `answer`에 `conv{act,raw,rewritten,how,turn,pres}`·`rag{dense,bm25,fused,rerank,final}`·`stt{engine,raw,final,asr_ms,end_to_final_ms}`·`tierFiltered`, `eval/stt_stream.jsonl`.
 - **로컬 LLM 기본·OpenAI 승인 시 선택 [2026-10-13 v10.7, 서버+클라이언트 — 서버 재시작+새로고침]**: 일반(비관리자) 계정은 승인 시 **기본이 로컬 LLM·로컬 TTS 전용**. 사용자 탭 승인 폼의 "OpenAI" 체크박스가 **기본 해제**(체크해야 클라우드 허용), 개요 탭 간편 승인도 로컬 전용으로 승인(`openaiChoice` 마커 + `allowOpenai` 체크 시에만 1). 미허용 계정은 `window.__USER_PERM__.openai=false` → 발표 화면이 TTS 엔진과 **대본·Q&A LLM(scriptEngine)을 모두 local로 고정**, 설정의 OpenAI 버튼 숨김, 최신성 질문의 클라우드 위임도 차단. **서버 게이트**: `/api/script`도 allow_openai 미허용이면 403(화면 우회 차단, `/api/tts-openai`는 기존 게이트). 관리자는 항상 허용. 기존 승인 계정의 값은 유지, 사후 토글(☁️ 허용/차단) 그대로.
 - **OpenAI 고정 문구 발음·검증 + 종료 Q&A 대기 재설계 [2026-10-13~14 v10.4~v10.6 · 3fec770, 서버+클라이언트]**: ① **OpenAI TTS 서버 검증 프록시** `/api/tts-openai`(server.js) — n8n 웹훅 결과를 로컬 ASR(8323 `/stt`)로 역검증(2-gram 재현율 <0.75면 최대 3회 재생성, 영문·숫자 토큰은 면제), 40자 이하 **고정 문구는 한글 완전 일치**(5회 시도) 후 `data/tts-cache/<sha1>.wav`에 결정적 캐시. 모델 **gpt-4o-mini-tts + 한국어 발음 instructions**(n8n koen_openai_tts_bin). ② "다른 질문 없으시면…" 문두 'ㄷ'이 'ㅌ'처럼("타른") 들리는 문제 → **"혹시 다른 질문 없으시면 계속 발표해도 될까요?"** 로 문두 완충(nova 3회 ASR 완전 일치 확인, 청취 확인은 운영자). ③ IoT→"아이오티" 통일(`_KONIZE_TABLE`, AIoT→에이아이오티). ④ **종료 Q&A**: "제가 준비한 발표 자료는 여기까지입니다. 질문 있으신가요?"만 말하고 **6초 대기**(`CLOSING_WAIT_MS=6000`, 사용자 음성 감지 시 12초 연장, 답변 뒤 추가 질문 10초) → 질문 없으면 "더 이상 질문이 없으시면 제 발표는 마치겠습니다. 경청해 주셔서 감사합니다." 후 종료.
 - **답변 근거 검증 문장 단위화 [2026-10-13 v10.5·7f72f98, 클라이언트]**: "IoT가 뭐예요"류(용어 정의=일반 상식 + 자료 내용 혼합 답)가 답변 전체 어휘 겹침 0.22로 통째 거절되던 문제. `verifyAnswer`가 **문장마다** 판정 — 자료에 실존(숫자·영문 토큰 존재 + 한글 2-gram 겹침 ≥0.35)하면 자료 문장, 아니면 `allowGen`(일반 태그·refs 0건·정의형 질문)+`_generalSentenceOk`(사내 사실·시의성·새 숫자 없음)일 때만 일반 문장("일반적인 상식으로 말씀드리면," 접두), 그 외 폐기·남는 문장이 없으면 거절. 자료 기반 문장엔 출처·문서명을 말하지 않는다(내장 지식).
@@ -463,6 +464,7 @@ v9c 새로고침 후 실시간 감시로 잡은 오염 3건과 사용자 지정 
 | v10.5 | 정의(일반 상식)+자료 혼합 답변 통째 거절("IoT가 뭐예요") | 문장 단위 근거 검증(`verifyAnswer`) |
 | v10.6 | 종료 질문 후 대기 없이 끝인사·고정 문구 발음 불안정 | 질문 후 6초 대기+음성 감지 연장+끝인사 후행, 고정 문구 완전 일치 검증 |
 | v10.7 | 일반 유저도 OpenAI 기본 허용 | 승인 시 기본 로컬 LLM/TTS 전용, OpenAI는 체크 허용, `/api/script` 서버 게이트 |
+| v11.0 | 후속질문·지시어 맥락 미인식, Dense 단독 검색(고유명사·숫자 취약), 브라우저 STT 도메인 용어 오인식 | Conversation Manager + Hybrid RAG + 서버 Streaming STT(개발지시서 v1.0 Phase 1~4) |
 
 ## 10. 파일 구조
 
