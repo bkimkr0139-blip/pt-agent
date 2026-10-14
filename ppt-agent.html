@@ -891,7 +891,7 @@ function detectIntent(text){
   // 1. 일시정지 — "잠깐만요", "잠시만요", "멈춰주세요", "stop"
   // [2026-10-14] "아 잠깐만요 우리끼리 토의 좀 하고요"처럼 추임새 선두·긴 발화·토의 선언도 일시정지(기존: 20자 미만+문두만 → INTENT_RE '잠깐'에 걸려 질문으로 접수돼 거절·지식습득 오염).
   // 단 "잠깐만요 질문 있습니다"는 일시정지가 아니라 질문 예고(ask)로 넘긴다.
-  {const _tx=text.replace(/^(아+|어+|음+|저기|자|그|네)[\s,.]*/,'');
+  {const _tx=text.replace(/^((아+|어+|음+|저기|자|그|네+|알겠(습니다|어요)|넵)[\s,.]*)+/,'');
    if(/^(잠깐|잠시|멈춰|멈출|중지|정지|그만|스톱|stop|wait|hold)/i.test(_tx)){
      if(/(질문.{0,4}있|질문할게|질문드릴|질문드리|질문\s*좀|여쭤(봐도|볼)|물어(봐도|볼게))/.test(_tx)&&_tx.length<40)return'ask';
      if(_tx.length<20||(isDiscussCue(_tx)&&_tx.length<50))return'pause';
@@ -1805,6 +1805,19 @@ recognizer.onresult=e=>{
       if(PRON_YES_RE.test(t)){const r=_pronResolve;_pronResolve=null;if(qaState==='pron_confirm')qaState='answering';if(r)try{r(true)}catch(e){}return}
       _pronTimer=setTimeout(pronConfirmTimeout,6000);  // 애매한 발화 — 응답 시간 연장
       return;
+    }
+    // ── [2026-10-14] Q&A 대기 상태에서의 "잠깐만요/우리끼리 얘기" — 질문으로 오접수하지 않고 대기(HOLD)로 ──
+    // 실측: 답변 뒤 "다른 질문 없으시면…?"(confirming)에서 "잠깐만요 우리끼리 얘기 해 보고요"가 8자+ 발화 흡수 분기로 빠져 질문으로 답변·거절됐다.
+    if(qaState==='waiting_question'||qaState==='confirming'||qaState==='closing_qa'||qaState==='deferring'){
+      const _disc=isDiscussCue(t),_pz=intent==='pause'&&qaState!=='waiting_question';  // waiting_question의 순수 "잠깐만요"는 기존대로 대기 연장
+      const _human=(intent==='question'||intent==='intent')&&!/(요|까요|나요|니까|습니까|죠)\s*[?？]?$/.test(t)&&/(과장|팀장|부장|대리|차장|이사|선생|교수|주무관|위원)/.test(t);
+      if((_disc&&intent!=='ask')||_pz||_human){
+        const _prev=qaState;
+        clearTimeout(_waitQTimer);clearTimeout(_confirmTimer);clearTimeout(_closingTimer);
+        if(_prev==='deferring')resolveDeferred(false);
+        enterHold('state:'+_prev+(_human?' (사람 호칭)':''),t,_prev);
+        return;
+      }
     }
     // ── qaState별 라우팅 ──
     if(qaState==='waiting_question'){
@@ -3332,7 +3345,7 @@ function pauseForBackgroundTalk(){
 // [2026-10-14 사용자 지시] 대화 대기(HOLD) — "잠깐만요"나 지속적인 배경 대화로 발표를 멈추면 말없이 기다린다.
 // 마지막 발화로부터 HOLD_QUIET_MS 동안 조용해지면 "다시 발표해도 될까요?"를 묻고, 10초 무응답이거나 재개 요청("계속 발표해 주세요",
 // "계속 진행합시다", "네")이면 이어간다. 확인 질문 뒤에 다시 대화가 이어지면 HOLD로 되돌아간다.
-let _holdTimer=null,_holdBuf=[],_holdQuiet=6000;
+let _holdTimer=null,_holdBuf=[],_holdQuiet=6000,_holdPrev='playing';  // _holdPrev: 대기 진입 직전 상태(재개 시 복귀 경로 결정)
 const HOLD_QUIET_MS=6000,HOLD_QUIET_DISCUSS_MS=12000;  // 토의 선언("우리끼리 토의 좀")이 있으면 더 길게 기다린다
 // 대기 중 발화의 수신자 판정 — 규칙(사람 호칭·반말·토의 단서) 후 로컬 LLM(2.5초), 실패 시 규칙 폴백
 const HUMAN_CUE_RE=/(과장|팀장|부장|대리|사원|차장|이사|선생|교수|주무관|위원|님[,\s]|님$)|(야|니|냐|지|어|래|게|걸)\??$|(할까|어때|그치|맞지)\??$/;
@@ -3360,8 +3373,8 @@ async function judgeAddressee(t,buf){
   if(chat.length&&!formal)return'HUMAN';
   return formal?'AGENT':'HUMAN';
 }
-function enterHold(why,text){
-  _holdBuf=[];_holdQuiet=(text&&isDiscussCue(text))?HOLD_QUIET_DISCUSS_MS:HOLD_QUIET_MS;
+function enterHold(why,text,prev){
+  _holdPrev=prev||'playing';_holdBuf=[];_holdQuiet=(text&&isDiscussCue(text))?HOLD_QUIET_DISCUSS_MS:HOLD_QUIET_MS;
   if(audioEl){audioEl.pause();audioEl=null}
   try{speechSynthesis.cancel()}catch(e){}
   ttsSpeaking=false;interrupted=true;
@@ -3379,6 +3392,13 @@ function scheduleHoldCheck(){
   _holdTimer=setTimeout(async()=>{
     if(qaState!=='holding')return;
     if(Date.now()-_sttLastEvt<_holdQuiet){scheduleHoldCheck();return}  // 아직 말하는 중 — 계속 대기
+    if(_holdPrev==='closing_qa'){  // 발표 종료 후 Q&A 중 대기 — 발표 재개가 아니라 질문 대기로 복귀
+      _holdPrev='playing';interrupted=false;qaState='closing_qa';
+      setStatus('💬 더 질문 있으신가요?');
+      try{await speakUnified('더 질문 있으신가요?')}catch(e){}
+      clearTimeout(_closingTimer);_closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},CLOSING_AFTER_ANSWER_MS);
+      return;
+    }
     qaState='confirming_continue';
     setStatus('⏸ 다시 발표해도 될까요?');
     const g=_qaGen;
@@ -3392,6 +3412,8 @@ function scheduleContinueSilenceTimer(){
 }
 function resumeFromBackgroundPause(){
   clearTimeout(_continueSilenceTimer);clearTimeout(_holdTimer);
+  if(_holdPrev==='closing_qa'){_holdPrev='playing';interrupted=false;qaState='closing_qa';clearTimeout(_closingTimer);_closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},CLOSING_AFTER_ANSWER_MS);return}
+  _holdPrev='playing';
   qaState='idle';
   resumeFromInterrupted();
 }

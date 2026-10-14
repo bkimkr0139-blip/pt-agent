@@ -16,7 +16,7 @@ const H=sb.__h,sleep=ms=>new Promise(r=>setTimeout(r,ms));let bad=0;const chk=(n
 (async()=>{
   for(const t of ['계속 발표해 주세요','계속 진행합시다','발표 계속해주세요','이어서 진행해 주세요'])chk('재개 요청 인식: '+t,H.RESUME_RE.test(t));
   chk('잠깐만요 = pause',H.detectIntent('잠깐만요')==='pause');
-  for(const [t,w] of [['아 잠깐만요 우리끼리 좀 토이 좀 하고요','pause'],['잠깐만요 우리끼리 토의 좀 하고요','pause'],['잠깐만요','pause'],['잠깐만요 질문 있습니다','ask'],['어 잠시만요 저희끼리 상의 좀 할게요','pause'],['변화를 확인하고 질문했습니다','ask'],['질문 있어요','ask'],['질문하겠습니다','ask']])chk('의도 '+t+' → '+w,H.detectIntent(t)===w);
+  for(const [t,w] of [['아 잠깐만요 우리끼리 좀 토이 좀 하고요','pause'],['잠깐만요 우리끼리 토의 좀 하고요','pause'],['잠깐만요','pause'],['잠깐만요 질문 있습니다','ask'],['어 잠시만요 저희끼리 상의 좀 할게요','pause'],['변화를 확인하고 질문했습니다','ask'],['질문 있어요','ask'],['질문하겠습니다','ask'],['알겠습니다 잠시만요','pause'],['잠깐만요 우리끼리 얘기 좀 해 보고요','pause']])chk('의도 '+t+' → '+w,H.detectIntent(t)===w);
   chk('토의 종료 인식',H.DISCUSS_DONE_RE.test('토의 다 했습니다')&&H.DISCUSS_DONE_RE.test('이제 얘기 끝났어요'));
   // 수신자 판정(LLM 없음 → 규칙 폴백): 사람끼리 vs AI에게
   for(const [t,buf,w] of [['과장님은 어떻게 생각하세요',[],'HUMAN'],['이거 내일까지 되겠어?',[],'HUMAN'],['이 사업의 KPI는 무엇인가요',[],'AGENT'],['그럼 예산은 얼마나 잡을까',[{t:'일정은 어떻게 하지',ts:Date.now()}],'HUMAN']])chk('수신자 '+t+' → '+w,(await H.judgeAddressee(t,buf))===w);
@@ -29,5 +29,8 @@ const H=sb.__h,sleep=ms=>new Promise(r=>setTimeout(r,ms));let bad=0;const chk=(n
   await sleep(6000);chk('A4 질문 후 ~7초 시점엔 아직 재개 안 함',!log.includes('RESUME'));
   await sleep(5000);chk('A5 10초 무응답 → 재개',log.includes('RESUME'));
   log.length=0;H.qaState='confirming_continue';H.resume();chk('B 재개 호출 → RESUME',log.includes('RESUME')&&H.qaState==='idle');
+  // 종료 후 Q&A(closing_qa)에서 대기 → 조용해지면 "더 질문 있으신가요?"로 복귀(발표 재개 아님)
+  log.length=0;sb.finishPresentation=()=>log.push('FINISH');H.stt=Date.now()-7000;H.enterHold('state:closing_qa','잠깐만요','closing_qa');
+  await sleep(1500);chk('C 종료 Q&A 대기 → "더 질문 있으신가요?" 복귀',H.qaState==='closing_qa'&&log.includes('say:더 질문 있으신가요?')&&!log.includes('RESUME'));
   process.exit(bad?1:0);
 })();
