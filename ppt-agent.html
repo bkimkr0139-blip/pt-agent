@@ -376,6 +376,10 @@ body.fs .main{height:100vh;height:100dvh}
     <div class="setRow"><span class="setLbl">🎤 발표 중 음성 명령</span>
       <button class="setBtn" id="micCmdOn" onclick="setMicCmd(true)" title="발표 중 말하면 멈추고 질문에 답합니다">켬 (질의응답)</button>
       <button class="setBtn on" id="micCmdOff" onclick="setMicCmd(false)" title="마이크를 끄고 끊김 없이 끝까지 재생">끔 (끊김 없음)</button></div>
+    <!-- [2026-10-14 고도화 Phase 3] 음성 인식 엔진 — 브라우저(Web Speech, 기본) / 서버 스트리밍(VAD+Qwen3-ASR+PT 핫워드). 서버 장애 시 자동으로 브라우저 방식으로 폴백. -->
+    <div class="setRow"><span class="setLbl">🎙 음성 인식 엔진</span>
+      <button class="setBtn on" id="sttWeb" onclick="setSttMode('web')" title="브라우저 내장 음성 인식(기본)">🌐 브라우저</button>
+      <button class="setBtn" id="sttServer" onclick="setSttMode('server')" title="서버 스트리밍 인식 — 발표 용어(핫워드) 보정, 장애 시 자동 폴백">🖥️ 서버 (핫워드)</button></div>
     <!-- [2026-10-06, 사용자 요청] 발표 하단 표시 토글 — 전체화면 발표 중 하단 캡션·컨트롤바가 시선을 빼앗는 문제.
          끔(집중 모드, 기본): 캡션 숨김 + 컨트롤바는 마우스 움직임에만 3초 표시(정지 버튼 접근 유지). -->
     <div class="setRow"><span class="setLbl">🖥️ 발표 하단 표시</span>
@@ -1693,6 +1697,7 @@ recognizer.onresult=e=>{
     let t=r[0].transcript.trim();  // [2026-10-05 v9b] let — 에코 접두 절단으로 질문 본문만 남길 수 있음
     // [2026-10-05] 원격 진단 — 최종 인식분을 서버 dbg로 적립(마이크가 뭘 들었는지 로그로 재구성)
     dbg('🎙 "'+t.slice(0,30)+'"');
+    if(!window._sttMeta||window._sttMeta.engine!=='server'||window._sttMeta.final!==t)window._sttMeta={engine:'web',raw:t.slice(0,120),final:t.slice(0,120)};  // [2026-10-14] 로그용 — 인식 엔진·원문·최종문
     // [2026-09-29] "네"/"예" 같은 한 글자 긍정 응답이 길이<2 필터에 걸려 통째로 무시되던 문제 — 예외 처리
     if((t.length<2&&!/^(네|예|응|넵|넹)$/.test(t))||isHall(t))continue;
     // [2026-10-07 v10] 동일 파이널 중복 폐기 — ASR이 같은 발화를 2회 방출한다(실측 qa_log: 14ms 간격
@@ -1972,8 +1977,116 @@ recognizer.onresult=e=>{
       if(_bgTalkTimes.length>=BG_TALK_THRESHOLD){_bgTalkTimes=[];pauseForBackgroundTalk()}
     }
   }
-};recognizer.onend=()=>{_sttLastEvt=Date.now();if(sttActive){setTimeout(()=>{if(sttActive)try{recognizer.start()}catch(e){console.warn('STT 재시작 실패:',e.message)}},250)}};try{recognizer.start();sttActive=true}catch(e){console.warn('STT 시작 실패:',e.message)}}
-function stopListening(){sttActive=false;if(recognizer){try{recognizer.stop()}catch(e){}recognizer=null}}
+};recognizer.onend=()=>{_sttLastEvt=Date.now();if(sttActive){setTimeout(()=>{if(sttActive)try{recognizer.start()}catch(e){console.warn('STT 재시작 실패:',e.message)}},250)}};try{if(ServerStt.wanted()){sttActive=true;ServerStt.start().catch(er=>{console.warn('서버 STT 시작 실패:',er);if(typeof dbg==='function')dbg('⚠ 서버 STT 시작 실패('+(er&&er.message||er)+')');ServerStt.st.fallback=true;qaLog('stt_fallback_web',{why:String(er&&er.message||er).slice(0,60)});if(sttActive)startListening()})}else{recognizer.start();sttActive=true}}catch(e){console.warn('STT 시작 실패:',e.message)}}
+/*SERVERSTT-BEGIN*/
+// ── 서버 Streaming STT 클라이언트 [2026-10-14 고도화 Phase 3] ─────────────────────────────────
+// 마이크(에코 제거·잡음 억제 켬) → 16kHz PCM16 100ms 청크 → /api/stt/chunk. 서버 VAD·Qwen3-ASR가 speech_start/partial/final을 돌려주면
+// 기존 Web Speech 처리 파이프라인(recognizer.onresult: 환각·중복·에코 필터, 의도 판별, 더킹)에 같은 모양의 결과로 흘려 넣는다 —
+// 필터·상태기계는 한 줄도 갈라지지 않는다. 장애 시: 재연결 2회 → Web Speech 폴백(로그 기록, 사용자 화면에는 노출 없음).
+const ServerStt=(()=>{
+  let ctx=null,node=null,stream=null,sid=null,gen=0,active=false,q=[],sending=false,fails=0,reconnects=0,acc=new Float32Array(0),srcRate=16000,startedAt=0;
+  const st={fallback:false,lastErr:'',chunks:0,events:0};
+  const OUT_SAMPLES=1600;  // 100ms @16k — 이벤트 수신 지연(응답 폴링 간격)을 줄인다
+  const WORKLET=`class P extends AudioWorkletProcessor{process(i){const c=i[0]&&i[0][0];if(c)this.port.postMessage(new Float32Array(c));return true}}registerProcessor('pcm-cap',P)`;
+  function wanted(){let m='web';try{m=localStorage.getItem('ppt_agent_stt_mode')||'web'}catch(e){}return m==='server'&&!st.fallback&&!!(navigator.mediaDevices&&window.AudioContext)}
+  function toPcm(f32){const o=new Int16Array(f32.length);for(let i=0;i<f32.length;i++){const v=Math.max(-1,Math.min(1,f32[i]));o[i]=v<0?v*32768:v*32767}return o}
+  function push(f32){
+    // 연속 수집 → 16k 선형 보간 다운샘플 → 200ms 블록
+    const merged=new Float32Array(acc.length+f32.length);merged.set(acc);merged.set(f32,acc.length);acc=merged;
+    const ratio=srcRate/16000,need=Math.ceil(OUT_SAMPLES*ratio);
+    while(acc.length>=need){
+      const blk=new Float32Array(OUT_SAMPLES);
+      for(let i=0;i<OUT_SAMPLES;i++){const p=i*ratio,i0=Math.floor(p),fr=p-i0;blk[i]=(acc[i0]||0)*(1-fr)+(acc[Math.min(i0+1,acc.length-1)]||0)*fr}
+      acc=acc.slice(need);
+      q.push(toPcm(blk).buffer);if(q.length>25){q.shift();st.dropped=(st.dropped||0)+1}  // 5초 이상 밀리면 오래된 청크 폐기(지연 상한)
+    }
+    pump();
+  }
+  async function pump(){
+    if(sending||!active||!sid)return;sending=true;const my=gen;
+    try{
+      while(q.length&&active&&my===gen){
+        const buf=q.shift();
+        const r=await fetch('/ppt-agent/api/stt/chunk?sid='+encodeURIComponent(sid),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:buf});
+        if(r.status===404){throw new Error('session-gone')}
+        if(!r.ok)throw new Error('http '+r.status);
+        const j=await r.json();fails=0;st.chunks++;_sttLastEvt=Date.now();  // 감시자(12초 무이벤트)용 생존 신호
+        for(const e of (j.events||[]))dispatch(e);
+      }
+    }catch(e){
+      if(my===gen){fails++;st.lastErr=String(e.message||e);if(String(e.message)==='session-gone'||fails>=3){sending=false;recover(st.lastErr);return}}
+    }
+    sending=false;if(q.length&&active&&my===gen)setTimeout(pump,fails?400:0);
+  }
+  function fake(text,final,suspect){   // 4번째 인자(arguments[3]) = 서버 이벤트(로그용 raw·지연)
+    if(!recognizer||!recognizer.onresult)return;
+    const r=[{transcript:text,confidence:0.9}];r.isFinal=final;
+    if(final)window._sttMeta={engine:'server',raw:String(arguments[3]&&arguments[3].raw||text).slice(0,120),final:text.slice(0,120),asr_ms:arguments[3]&&arguments[3].asr_ms,end_to_final_ms:arguments[3]&&arguments[3].end_to_final_ms};
+    if(final&&suspect)window._sttSuspect=suspect;   // 핫워드 퍼지 교정 — handleInterruption이 "…를 말씀하신 건가요?" 확인에 쓴다
+    try{recognizer.onresult({resultIndex:0,results:[r]})}catch(e){console.warn('STT 결과 처리 오류:',e)}
+  }
+  function dispatch(e){
+    st.events++;
+    if(e.type==='speech_start'){_sttLastEvt=Date.now();dbg('🎙 서버 STT 발화 시작 #'+e.uttNo)}
+    else if(e.type==='partial'&&e.text)fake(e.text,false);
+    else if(e.type==='final'&&e.text){dbg('🎙 서버 STT 최종 #'+e.uttNo+' ('+e.end_to_final_ms+'ms'+(e.corrected?', 핫워드 보정':'')+')');fake(e.text,true,e.suspect,e)}
+    else if(e.type==='error')dbg('⚠ 서버 STT 오류: '+e.message);
+  }
+  async function recover(why){
+    if(!active)return;
+    reconnects++;dbg('⚠ 서버 STT 연결 문제('+why+') — '+(reconnects<=2?'재연결 '+reconnects+'/2':'Web Speech로 폴백'));
+    qaLog('stt_server_issue',{why:String(why).slice(0,60),reconnects});
+    const was=sttActive;ServerStt.stop();
+    if(reconnects<=2){setTimeout(()=>{if(was){sttActive=true;start().catch(er=>recover('start '+(er.message||er)))}},reconnects*1000);return}
+    st.fallback=true;qaLog('stt_fallback_web',{why:String(why).slice(0,60)});
+    if(was)startListening();   // wanted()가 이제 false → Web Speech
+  }
+  async function start(){
+    stop();active=true;const my=++gen;q=[];acc=new Float32Array(0);fails=0;
+    stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    if(my!==gen){stream.getTracks().forEach(t=>t.stop());return}
+    let hot=[];try{hot=sttHotwords()}catch(e){}
+    const r=await fetch('/ppt-agent/api/stt/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hotwords:hot})});
+    if(!r.ok)throw new Error('start http '+r.status);
+    const j=await r.json();sid=j.sid;
+    try{ctx=new AudioContext({sampleRate:16000})}catch(e){ctx=new AudioContext()}
+    srcRate=ctx.sampleRate;if(ctx.state==='suspended')try{await ctx.resume()}catch(e){}
+    const src=ctx.createMediaStreamSource(stream);
+    if(ctx.audioWorklet){
+      const url=URL.createObjectURL(new Blob([WORKLET],{type:'application/javascript'}));
+      await ctx.audioWorklet.addModule(url);URL.revokeObjectURL(url);
+      node=new AudioWorkletNode(ctx,'pcm-cap',{numberOfInputs:1,numberOfOutputs:0});node.port.onmessage=ev=>{if(active&&my===gen)push(ev.data)};src.connect(node);
+    }else{
+      node=ctx.createScriptProcessor(4096,1,1);node.onaudioprocess=ev=>{if(active&&my===gen)push(new Float32Array(ev.inputBuffer.getChannelData(0)))};src.connect(node);node.connect(ctx.destination);
+    }
+    startedAt=Date.now();reconnects=reconnects;dbg('🎙 서버 STT 시작 (핫워드 '+j.hotwords+'개, '+srcRate+'Hz)');
+  }
+  function stop(){
+    active=false;gen++;const s=sid;sid=null;
+    try{if(node){node.disconnect();if(node.port)node.port.onmessage=null}}catch(e){}
+    try{if(stream)stream.getTracks().forEach(t=>t.stop())}catch(e){}
+    try{if(ctx&&ctx.state!=='closed')ctx.close()}catch(e){}
+    node=null;stream=null;ctx=null;q=[];sending=false;
+    if(s)try{fetch('/ppt-agent/api/stt/stop?sid='+encodeURIComponent(s),{method:'POST',keepalive:true}).catch(()=>{})}catch(e){}
+  }
+  return{wanted,start,stop,st,get active(){return active}};
+})();
+/*SERVERSTT-END*/
+// PT 도메인 핫워드 자동 추출 — 슬라이드 제목·영문 약어·제품/기술 용어. 서버가 문서 어휘·발음 사전과 합쳐 ASR 컨텍스트와 보정 사전으로 쓴다.
+function sttHotwords(){
+  const set=new Set(),add=w=>{w=String(w||'').trim();if(w.length>=2&&w.length<=40)set.add(w)};
+  for(const s of (slides||[])){
+    add(s.title);
+    String(s.title||'').split(/[\-–—:·|,/()]+/).forEach(add);
+    const blob=[s.title,s.note,(s.bullets||[]).join(' '),s.script].join(' ');
+    for(const m of blob.matchAll(/[A-Za-z][A-Za-z0-9]{1,15}/g)){const w=m[0];if(/[A-Z].*[A-Z]|\d|^[A-Z][a-z]+[A-Z]/.test(w)||/^[A-Z]{2,}/.test(w))add(w)}
+  }
+  try{const p=localStorage.getItem('ppt_agent_project');if(p)add(p)}catch(e){}
+  return[...set].slice(0,180);
+}
+function setSttMode(m){try{localStorage.setItem('ppt_agent_stt_mode',m)}catch(e){}ServerStt.st.fallback=false;document.getElementById('sttWeb').classList.toggle('on',m!=='server');document.getElementById('sttServer').classList.toggle('on',m==='server');if(sttActive){stopListening();startListening()}}
+
+function stopListening(){sttActive=false;try{ServerStt.stop()}catch(e){}if(recognizer){try{recognizer.stop()}catch(e){}recognizer=null}}
 // [2026-10-05] STT 침묵 감시자 — Chrome 연속 인식이 onend/onerror 없이 조용히 죽는 경우가 있고
 // 그 동안 사용자가 "질문있다"를 말해도 아무 일도 안 일어난다(실측: 발표 재개 후 재질문 무반응).
 // 12초간 어떤 이벤트도 없으면 인식기를 새로 기동해 스스로 회복한다.
@@ -2308,7 +2421,7 @@ async function generateAnswer(q,ragPromise,stats){
       const _rs=await Promise.race([ragPromise||searchRef(q,4),new Promise(r=>setTimeout(()=>r(null),RAG_BUDGET_MS))]);
       // [2026-10-06] searchRef가 {refs,suspect} 반환(발음 교정) — 구배열(낡은 탭↔서버 버전차)도 호환 정규화
       let refs=_rs===null?null:(Array.isArray(_rs)?_rs:(_rs.refs||[]));
-      const _suspect=_rs&&!Array.isArray(_rs)?(_rs.suspect||null):null;
+      const _suspect=(_rs&&!Array.isArray(_rs)?(_rs.suspect||null):null)||(stats&&stats.sttSuspect?{from:stats.sttSuspect.from,to:stats.sttSuspect.to}:null);
       if(stats&&_suspect)stats.pronSuspect=_suspect;
       if(stats&&_rs&&_rs.trace)stats.ragTrace=_rs.trace;  // [2026-10-14] dense/BM25/융합/재랭크/최종 청크 — qa_log에 적재
       // [2026-10-06, 사용자 요청] 발음 확인 1회 — ASR 오타 교정 suspect가 붙었고 라이브 질문 흐름이면
@@ -3001,7 +3114,9 @@ async function handleInterruption(q,fromClosing){
   _lastQ=q;  // [2026-10-05 v9c] 메타 질문("아까 그 질문") 재링크용 직전 질문 추적
   qa.textContent='💬 질문: '+q;
   setStatus('💬 답변 준비 중…');
-  const stats={errors:[],fillers:1,confirmSuspect:true};  // confirmSuspect: [2026-10-06] 라이브 질문 한정 — 교정 suspect 발음 확인 1회 허용
+  const stats={errors:[],fillers:1,confirmSuspect:true};
+  stats.sttMeta=window._sttMeta||null;
+  if(window._sttSuspect){stats.sttSuspect=window._sttSuspect;window._sttSuspect=null}  // [2026-10-14] 서버 STT 핫워드 퍼지 교정 — 아래 검색 suspect가 없을 때 같은 확인 질문 경로로  // confirmSuspect: [2026-10-06] 라이브 질문 한정 — 교정 suspect 발음 확인 1회 허용
   stats.purged=purgePrefetchTts();  // [2026-10-05] 발표 프리페치 백로그 폐기 — Q&A 음성 우선
   qaLog('purge_prefetch',{n:stats.purged});
 
@@ -3059,7 +3174,7 @@ async function handleInterruption(q,fromClosing){
   hideSearchIndicator();  // 표시기 잔존 방어 — 어떤 경로로 켜졌든 확인 멘트 전엔 닫혀 있어야 한다
 
   const _tid=ConvMgr.record(_cv,stats.ragMiss?NO_INFO_MSG:answer,{unanswered:!!stats.ragMiss});
-  qaFlushLog({state:'answer',conv:Object.assign(ConvMgr.logView(_cv),{turn:_tid}),rag:stats.ragTrace||null,tierFiltered:stats.tierFiltered||0,q:String(q).slice(0,300),ragMs:stats.ragMs??null,scriptMs:stats.scriptMs??null,llmMs:stats.llmMs??null,engine:stats.engine||null,ragRefs:stats.ragRefs??null,ragTimeout:!!stats.ragTimeout,fillers:stats.fillers,answerChars:stats.answerChars??answer.length,answerTtsMs:stats.answerTtsMs??null,parametric:!!stats.parametric,latest:!!stats.latestRouted,textFallback:!stats.engine&&!stats.ragMs&&!stats.llmMs?false:undefined,errors:stats.errors,source:stats.source||null,verifyWhy:stats.verifyWhy||null,rawAns:stats.rawAns||null,firstRaw:stats.firstRaw||null,firstWhy:stats.firstWhy||null,retried:!!stats.retried});
+  qaFlushLog({state:'answer',conv:Object.assign(ConvMgr.logView(_cv),{turn:_tid}),rag:stats.ragTrace||null,tierFiltered:stats.tierFiltered||0,stt:stats.sttMeta||null,q:String(q).slice(0,300),ragMs:stats.ragMs??null,scriptMs:stats.scriptMs??null,llmMs:stats.llmMs??null,engine:stats.engine||null,ragRefs:stats.ragRefs??null,ragTimeout:!!stats.ragTimeout,fillers:stats.fillers,answerChars:stats.answerChars??answer.length,answerTtsMs:stats.answerTtsMs??null,parametric:!!stats.parametric,latest:!!stats.latestRouted,textFallback:!stats.engine&&!stats.ragMs&&!stats.llmMs?false:undefined,errors:stats.errors,source:stats.source||null,verifyWhy:stats.verifyWhy||null,rawAns:stats.rawAns||null,firstRaw:stats.firstRaw||null,firstWhy:stats.firstWhy||null,retried:!!stats.retried});
   // [2026-10-05] Jev QA Router 섀도 관찰 — 기존 QA가 "다 끝난 뒤" 결과만 비동기 보고(지시서 §35).
   // await 없이 fire-and-forget, 실패 무시: 이 보고가 사용자 QA 결과에 개입할 경로가 구조적으로 없다.
   try{fetch('/ppt-agent/api/decision/observe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:String(q).slice(0,300),slideTitle:(slides[curSlideIdx]||{}).title||null,sessionMode:fromClosing?'closing_qa':'interrupt',rag:{count:stats.ragRefs??0,topScore:stats.ragTop??null,autoTop:!!stats.ragAuto},actual:{engine:stats.engine||null,ragMiss:!!stats.ragMiss,llmCalled:stats.engine==='openai-script'||stats.engine==='local-llm',responseMs:stats.scriptMs??null,ttsMs:stats.answerTtsMs??null}})}).catch(()=>{})}catch(e){}
@@ -3596,6 +3711,7 @@ function setMicCmd(v){
     setVoice(ttsVoice,true);
   }catch(e){}
   try{setMicCmd(micCmdEnabled)}catch(e){}
+  try{const m=localStorage.getItem('ppt_agent_stt_mode')==='server'?'server':'web';document.getElementById('sttWeb').classList.toggle('on',m==='web');document.getElementById('sttServer').classList.toggle('on',m==='server')}catch(e){}
   try{setHud(hudBottom,true)}catch(e){}  // [2026-10-06] 하단 표시 설정 복원(silent — 부팅 시 컨트롤바 표시 안 함)
   // [2026-10-04] qaBox 클릭 = 수동 "계속" — 발표가 어떤 이유로 멈춰도 클릭 한 번으로 재개
   const qb=document.getElementById('qaBox');

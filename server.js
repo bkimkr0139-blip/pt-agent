@@ -1336,6 +1336,48 @@ app.post(`${PREFIX}/api/search`, requireApiAuth, async (req, res) => {
   res.json({ refs: scored, suspect: corr.suspect, trace });
 });
 
+// ── 서버 Streaming STT [2026-10-14 고도화 Phase 3] ───────────────────────────────────────────
+// 브라우저가 16kHz PCM16 청크를 올리면 서버 VAD가 발화 시작·종료를 판정하고, Qwen3-ASR(:8323)로 부분/최종 전사한다.
+// 응답에 쌓인 이벤트(speech_start/partial/final)를 돌려준다. 프록시 체인(frp→nginx)에 Upgrade 설정이 필요 없는 HTTP 방식.
+const sttStream = require('./lib/stt_stream');
+const STT_LOG = path.join(__dirname, 'eval', 'stt_stream.jsonl');
+function serverHotwords(userId) {
+  const set = new Set();
+  try { for (const v of Object.values(JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'pron-dict.json'), 'utf8')))) if (typeof v === 'string') set.add(v); } catch { /* 사전 없음 */ }
+  try {
+    const rows = db.prepare('SELECT text FROM chunks WHERE user_id=?').all(userId);
+    const cnt = new Map();
+    for (const r of rows) for (const m of String(r.text).matchAll(/\b[A-Za-z][A-Za-z0-9]{1,15}\b/g)) {
+      const w = m[0]; if (/^[A-Z]{2,}[a-z]?[A-Z]*\d*$|^[A-Za-z]+\d+$|^[a-z]+[A-Z][A-Za-z]*$/.test(w)) cnt.set(w, (cnt.get(w) || 0) + 1);
+    }
+    for (const [w] of [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 40)) set.add(w);
+  } catch { /* 청크 없음 */ }
+  return [...set];
+}
+app.post(`${PREFIX}/api/stt/start`, requireApiAuth, (req, res) => {
+  const client = Array.isArray(req.body && req.body.hotwords) ? req.body.hotwords.slice(0, 200).map(x => String(x).slice(0, 40)) : [];
+  const sess = sttStream.createSession({
+    user: req.user.username, hotwords: [...client, ...serverHotwords(req.user.id)], asrUrl: TTS_ASR_URL,
+    log: (line) => { if (line && line[0] === '{') { try { fs.appendFileSync(STT_LOG, line + '\n'); } catch (_) {} } else console.log(`[STT-STREAM] ${line}`); },
+  });
+  res.json({ sid: sess.sid, hotwords: sess.hw.length, sampleRate: sttStream.SR });
+});
+app.post(`${PREFIX}/api/stt/chunk`, requireApiAuth, express.raw({ type: 'application/octet-stream', limit: '512kb' }), (req, res) => {
+  const sess = sttStream.getSession(String(req.query.sid || ''));
+  if (!sess || sess.user !== req.user.username) return res.status(404).json({ error: 'session-gone' });
+  const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  res.json({ events: sttStream.feed(sess, body), speaking: sess.speaking });
+});
+app.post(`${PREFIX}/api/stt/stop`, requireApiAuth, (req, res) => {
+  const sess = sttStream.getSession(String(req.query.sid || ''));
+  if (sess && sess.user === req.user.username) sttStream.sessions.delete(sess.sid);
+  res.json({ ok: true });
+});
+app.get(`${PREFIX}/api/stt/health`, requireApiAuth, async (req, res) => {
+  try { const r = await fetch(TTS_ASR_URL + '/health', { signal: AbortSignal.timeout(2000) }); res.json({ ok: r.ok, asr: await r.json() }); }
+  catch (e) { res.json({ ok: false, error: String(e.message || e).slice(0, 80) }); }
+});
+
 // ── 지식 자동 습득 폐루프 [2026-10-05, 사용자 요청] ──────────────────────────
 // 로컬 RAG에 없는 질문(rag-miss 거절)을 클라우드 LLM(koen-openai-script)으로 답해 같은 유저의
 // documents/chunks에 자동 임베딩한다. 발표가 거듭될수록 자동 지식이 쌓여 로컬 답변 커버리지가
@@ -1769,6 +1811,7 @@ app.post(`${PREFIX}/api/qa-log`, requireApiAuth, (req, res) => {
     source: b.source || null, verifyWhy: b.verifyWhy ? String(b.verifyWhy).slice(0, 80) : null,
     rawAns: b.rawAns ? String(b.rawAns).slice(0, 160) : null, firstRaw: b.firstRaw ? String(b.firstRaw).slice(0, 160) : null,
     firstWhy: b.firstWhy ? String(b.firstWhy).slice(0, 80) : null, retried: !!b.retried,
+    stt: (b.stt && typeof b.stt === 'object' && JSON.stringify(b.stt).length < 600) ? b.stt : null,  // [2026-10-14] STT 엔진·원문·최종문·ASR/최종 지연
     rag: (b.rag && typeof b.rag === 'object' && JSON.stringify(b.rag).length < 1500) ? b.rag : null, tierFiltered: b.tierFiltered ?? 0,  // [2026-10-14] dense/BM25/융합/재랭크 trace
     conv: (b.conv && typeof b.conv === 'object' && JSON.stringify(b.conv).length < 1500) ? b.conv : null,  // [2026-10-14] Conversation Manager 로그(대화행위·재작성·메모리·발표 위치)
     errors: Array.isArray(b.errors) ? b.errors.slice(0, 5) : [],
