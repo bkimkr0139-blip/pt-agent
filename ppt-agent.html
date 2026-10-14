@@ -3827,6 +3827,10 @@ document.getElementById('btnSettings').onclick=openSettings;
     if(l)r.setAttribute('data-theme','light');else r.removeAttribute('data-theme');
     try{localStorage.setItem('pt-theme',l?'light':'dark')}catch(e){} sync()};
   sync();
+  const ap=()=>{let l=false;try{l=localStorage.getItem('pt-theme')==='light'}catch(e){}
+    if(l)r.setAttribute('data-theme','light');else r.removeAttribute('data-theme');sync()};
+  addEventListener('storage',e=>{if(e.key==='pt-theme')ap()}); // 관리자 콘솔 등 다른 탭에서 바꾼 테마 즉시 반영
+  addEventListener('pageshow',ap);document.addEventListener('visibilitychange',()=>{if(!document.hidden)ap()});
 })();
 document.getElementById('settingsModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeSettings()});
 function setScriptEngine(m){if(m==='openai'&&window.__USER_PERM__&&!window.__USER_PERM__.openai)m='local';scriptEngine=m;try{localStorage.setItem('ppt_agent_script_engine',m)}catch(e){}document.getElementById('setScrOpenAI').classList.toggle('on',m==='openai');document.getElementById('setScrLocal').classList.toggle('on',m==='local')}
