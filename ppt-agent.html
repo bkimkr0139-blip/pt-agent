@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#080b12" />
+<script>try{var __t=localStorage.getItem('pt-theme');if(__t==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}</script>
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <title>🎤 AI 프레젠터</title>
@@ -19,6 +20,20 @@
   --shadow-s:0 1px 3px rgba(0,0,0,.4);--shadow-m:0 4px 16px rgba(0,0,0,.35);--shadow-l:0 12px 40px rgba(0,0,0,.5);
   --ease:cubic-bezier(.4,0,.2,1);--ease-spring:cubic-bezier(.34,1.56,.64,1);
 }
+/* [2026-10-14] 라이트 테마 — 변수 오버라이드. 토글: topBar 🌙/☀️, localStorage 'pt-theme'(관리자 콘솔과 공유) */
+:root[data-theme=light]{
+  --bg:#f3f5fa;--bg2:#ffffff;--surface:#ffffff;--surface2:#eef1f8;--line:#d9deea;--line2:#c3cadb;
+  --txt:#1a2033;--txt2:#38425e;--mut:#6a7490;--mut2:#8e97ae;
+  --pri:#4f52e0;--pri2:#5b5ee8;--pri-bg:rgba(79,82,224,.1);--pri-bd:rgba(79,82,224,.3);
+  --ok:#0f9f6e;--ok-bg:rgba(15,159,110,.1);--warn:#a8680a;--warn-bg:rgba(217,150,20,.12);--err:#d63a3a;
+  --shadow-s:0 1px 3px rgba(20,30,60,.12);--shadow-m:0 4px 16px rgba(20,30,60,.12);--shadow-l:0 12px 40px rgba(20,30,60,.18);
+  color-scheme:light;
+}
+:root[data-theme=light] .slideContent h2,:root[data-theme=light] .slideShapeTitle{color:var(--txt)}
+:root[data-theme=light] #noteBox,:root[data-theme=light] #aiBusy,:root[data-theme=light] .ticker{background:rgba(255,255,255,.93)}
+:root[data-theme=light] #noteText{color:var(--txt2)}
+:root[data-theme=light] #noteHead{color:var(--pri);border-bottom-color:var(--line)}
+:root[data-theme=light] .modal{background:rgba(20,30,60,.45)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
 *::-webkit-scrollbar{width:6px;height:6px}
 *::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
@@ -253,6 +268,7 @@ body.fs .main{height:100vh;height:100dvh}
 <div class="topBar">
   <h1><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg> AI 프레젠터</h1>
   <button class="iconBtn" id="btnNewFile" title="새 파일" style="display:none" onclick="location.reload()">📂</button>
+  <button class="iconBtn" id="btnTheme" title="다크/라이트 전환">🌙</button>
   <button class="iconBtn" id="btnSettings" title="설정">⚙️</button>
   <button class="iconBtn" id="btnPanel" title="패널" style="display:none">📋</button>
   <!--USER_NAV-->
@@ -3803,6 +3819,15 @@ document.getElementById('btnPanel').onclick=togglePanel;
 function openSettings(){document.getElementById('settingsModal').classList.add('show');try{document.getElementById('projFilter').value=localStorage.getItem('ppt_agent_project')||''}catch(e){}updatePPTList();updateRefDocList();document.getElementById('speedSlider').value=ttsSpeed;document.getElementById('speedVal').textContent=ttsSpeed.toFixed(2)+'x';updateSpeedTotalTime()}
 function closeSettings(){document.getElementById('settingsModal').classList.remove('show')}
 document.getElementById('btnSettings').onclick=openSettings;
+(function(){ // [2026-10-14] 다크/라이트 토글
+  const b=document.getElementById('btnTheme'),r=document.documentElement;
+  const sync=()=>{const l=r.getAttribute('data-theme')==='light';b.textContent=l?'☀️':'🌙';b.title=l?'다크 모드로 전환':'라이트 모드로 전환';
+    const m=document.querySelector('meta[name=theme-color]');if(m)m.content=l?'#f3f5fa':'#080b12'};
+  b.onclick=()=>{const l=r.getAttribute('data-theme')!=='light';
+    if(l)r.setAttribute('data-theme','light');else r.removeAttribute('data-theme');
+    try{localStorage.setItem('pt-theme',l?'light':'dark')}catch(e){} sync()};
+  sync();
+})();
 document.getElementById('settingsModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeSettings()});
 function setScriptEngine(m){if(m==='openai'&&window.__USER_PERM__&&!window.__USER_PERM__.openai)m='local';scriptEngine=m;try{localStorage.setItem('ppt_agent_script_engine',m)}catch(e){}document.getElementById('setScrOpenAI').classList.toggle('on',m==='openai');document.getElementById('setScrLocal').classList.toggle('on',m==='local')}
 const OPENAI_VOICES=['alloy','echo','fable','onyx','nova','shimmer'];

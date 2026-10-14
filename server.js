@@ -105,6 +105,7 @@ function fmtBytes(n) { if (!n) return '0B'; const u = ['B', 'KB', 'MB', 'GB']; l
 function page(title, body) {
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
+<script>try{if(localStorage.getItem('pt-theme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}</script>
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f1115;color:#e8e8ea;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0} /* 중앙정렬은 .adm min-height:100vh로 무력화 — 항상 상단 고정 */
 html{scrollbar-gutter:stable} /* [2026-10-05] 뷰포트 스크롤바는 html에 있으므로 root에 고정 — 탭 전환 좌우 흔들림 방지(body에 걸면 무효) */
@@ -183,7 +184,12 @@ h2.sec{font-size:.95rem;margin:20px 0 8px}
 .docView table{display:block;max-width:100%;overflow-x:auto;font-size:.76rem;margin:10px 0}
 .docView th{color:#9fb6e8;white-space:nowrap}
 .docView th,.docView td{padding:7px 9px}
-</style></head><body>${body}</body></html>`;
+/* [2026-10-14] 라이트 모드 — 하드코딩 색이 많아 반전 필터로 전환(이미지·SVG·미디어는 재반전해 원색 유지) */
+html[data-theme=light]{filter:invert(1) hue-rotate(180deg);background:#fff}
+html[data-theme=light] img,html[data-theme=light] video,html[data-theme=light] canvas,html[data-theme=light] svg{filter:invert(1) hue-rotate(180deg)}
+#themeTgl{position:fixed;right:14px;bottom:14px;z-index:999;width:42px;height:42px;margin:0;padding:0;border-radius:50%;background:#2b3a5c;border:1px solid #3d5a8a;font-size:1.1rem;box-shadow:0 2px 10px rgba(0,0,0,.4)}
+#themeTgl:hover{background:#3a4d78}
+</style></head><body>${body}<button id="themeTgl" type="button" title="다크/라이트 전환" onclick="(function(){var r=document.documentElement,l=r.getAttribute('data-theme')!=='light';if(l)r.setAttribute('data-theme','light');else r.removeAttribute('data-theme');try{localStorage.setItem('pt-theme',l?'light':'dark')}catch(e){}document.getElementById('themeTgl').textContent=l?'☀️':'🌙'})()">🌙</button><script>try{if(localStorage.getItem('pt-theme')==='light')document.getElementById('themeTgl').textContent='☀️'}catch(e){}</script></body></html>`;
 }
 function statusMessage(status) {
   if (status === 'pending') return '가입 승인 대기 중입니다. 관리자 승인 후 로그인할 수 있습니다.';
