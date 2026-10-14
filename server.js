@@ -1295,7 +1295,9 @@ function correctQuery(query, userId) {
         if (best) { best = null; break; } // 유사어 2개 이상 = 판단 불가, 교정 안 함
         best = cand;
       }
-      if (best) { q = q.split(t).join(best); if (!suspect) suspect = { from: t, to: best, rule: 'fuzzy' }; }
+      // [2026-10-14] 치환·확인 폐지 — 일반 단어("알람"→"사람","재실"→"사실","말이에요"→"뜻이에요")를 오교정해 모든 질문에 엉뚱한 "혹시 ○○ 말씀이신가요?" 확인(+8~11초 정지)을 유발했다.
+      // 원문은 보존하고 후보어를 질의에 덧붙여(확장) 검색만 보강한다. 확인 질문은 사전(dict) 교정에만 남긴다.
+      if (best && !q.includes(best)) q = q + ' ' + best;
     }
   }
   return { q, suspect };
