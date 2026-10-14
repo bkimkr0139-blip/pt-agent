@@ -1959,7 +1959,22 @@ recognizer.onresult=e=>{
     if(qaState==='answering'&&interrupted){
       // [2026-10-14 사용자 지시] 답변이 장황하다고 느낀 청중의 "아 알겠고요 / 이해했어요 / 다음으로 넘어가시죠" — 답변을 끊고 발표를 이어간다
       if(intent!=='ask'&&isSkipRequest(t)){skipAnswerAndContinue(t);return}
-      if(intent==='pause')return;  // 정지 버튼 사용 유도 — 답변 재생 체인에 세대 가드가 없어 즉시정지는 보류
+      // [2026-10-14] 답변 중 "잠깐만요/우리끼리 얘기" — 답변을 끊고 대기(HOLD). 세대 가드(_qaGen)가 생겨 안전하게 중단할 수 있다.
+      if(intent==='pause'||(isDiscussCue(t)&&intent!=='ask')){
+        _qaGen++;_pendingQ=null;if(_audioFin)_audioFin('답변중단');try{purgePrefetchTts('qa')}catch(e){}aiBusyEnd();
+        enterHold('answer',t,playing?'playing':'closing_qa');
+        return;
+      }
+      // [2026-10-14] 답변 중 새 질문/질문 예고 — 진행 중인 답변을 끊고 곧바로 접수한다(기존: 답변이 끝날 때까지 대기열에 보관해 인터럽트가 안 되는 것처럼 느껴졌다).
+      // 단 명확한 질문 형태(질문 예고·질문어·존댓말 의문형)만 — 맞장구·잡담은 기존대로 대기열. 종료 후 Q&A(!playing)는 호출부 후속 멘트와 겹치므로 대기열 유지.
+      if(playing&&t.replace(/\s/g,'').length>=6&&(intent==='ask'||((intent==='question'||intent==='intent')&&(/(어떻|왜|무엇|뭐|뭔|누가|언제|어디|어느|몇|얼마|무슨|어떤|알려|설명|요약)/.test(t)||/(요|까요|나요|니까|습니까|죠)\s*[?？]?$/.test(t))))){
+        const _tk=t.replace(/\s/g,'');
+        if(_tk===_answeringQKey||_tk===_answeringQRaw){dbg('🔁 답변 중 동일 질문 사본 폐기: "'+t.slice(0,20)+'"');return}
+        dbg('⚡ 답변 중 인터럽트 — 진행 답변을 끊고 새 질문 접수: "'+t.slice(0,24)+'"');qaLog('answer_barge_in',{t:t.slice(0,60)});
+        _pendingQ=null;if(_audioFin)_audioFin('답변인터럽트');try{purgePrefetchTts('qa')}catch(e){}aiBusyEnd();
+        handleInterruption(t);
+        return;
+      }
       if((intent==='question'||intent==='ask'||intent==='intent'||t.length>10)&&t.length>=4){
         // [2026-10-07 v10] 답변 중 들어온 발화가 지금 답변 중인 질문과 같으면 사본 — 큐에 넣지 않는다
         // (답변 직후 handleInterruption으로 재실행돼 진행 답변을 끊는 버그의 2차 방어선)
@@ -3350,12 +3365,12 @@ function pauseForBackgroundTalk(){
 // "계속 진행합시다", "네")이면 이어간다. 확인 질문 뒤에 다시 대화가 이어지면 HOLD로 되돌아간다.
 // ── 답변 건너뛰기 [2026-10-14] — 답변 중/직후 "아 알겠고요", "네 이해했어요 그 정도면 됐어요", "다음으로 넘어가시죠" ──
 // 의문형이거나 추가 질문·설명 요구가 섞이면 건너뛰기가 아니다("알겠는데 하나 더 질문이…"는 질문 흐름 유지).
-const SKIP_MOVE_RE=/(다음으로|넘어가|넘어갑시다|건너뛰|건너뛸|스킵|패스|그만\s*(설명|해|하셔|하세요|하시죠)|그\s*정도(면|로|만|이면)|이어서\s*(발표|진행|해)|계속\s*(발표|진행|해)|진행\s*(해|합시다|하시죠|하세요)|다음\s*(슬라이드|장표|페이지))/;
-const SKIP_ACK_RE=/^((아+|어+|네+|예|음|그래|그렇군요|넵)[\s,.]*)*(알겠(어요|습니다|고요|구요|어|네요)|이해(했|됐|가\s*됐|되었|가\s*되)|충분(해요|합니다|히)|됐(어요|습니다|고요|네요)|괜찮(아요|습니다)|잘\s*알겠)/;
+const SKIP_MOVE_RE=/(다음으로|넘어가|넘어갑시다|건너뛰|건너뛸|스킵|패스|그만\s*(설명|해|하셔|하세요|하시죠|해도)|그\s*정도(면|로|만|이면)|이어서\s*(발표|진행|해)|계속\s*(발표|진행|해)|진행\s*(해|합시다|하시죠|하세요)|다음\s*(슬라이드|장표|페이지))/;
+const SKIP_ACK_RE=/^((아+|어+|네+|예|음|그래|그렇군요|넵)[\s,.]*)*(알겠(어요|습니다|고요|구요|어|네요)|알았(어요|습니다|고요|구요|어|네요)|무슨\s*말인지\s*(알|이해)|이해(했|됐|가\s*됐|되었|가\s*되)|충분(해요|합니다|히)|됐(어요|습니다|고요|네요)|괜찮(아요|습니다)|잘\s*알겠)/;
 function isSkipRequest(t){
   t=String(t||'').trim();
   if(!t||t.length>60)return false;
-  if(/(질문|궁금|더\s*(설명|알려|자세)|자세히|다시\s*(설명|말)|무슨|뭐|뭔|무엇|왜|어떻게|언제|어디|누가|몇|얼마|[?？])/.test(t)&&!/(넘어가|건너뛰|스킵)/.test(t))return false;
+  if(/(질문|궁금|더\s*(설명|알려|자세)|자세히|다시\s*(설명|말)|무슨(?!\s*말인지\s*(알|이해))|뭐|뭔|무엇|왜|어떻게|언제|어디|누가|몇|얼마|[?？])/.test(t)&&!/(넘어가|건너뛰|스킵)/.test(t))return false;
   if(/(까요|나요|인가요|죠|ㅂ니까|습니까)\s*$/.test(t)&&!/(넘어가|건너뛰|스킵)/.test(t))return false;
   return SKIP_ACK_RE.test(t)||SKIP_MOVE_RE.test(t);
 }
