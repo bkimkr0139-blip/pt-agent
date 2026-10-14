@@ -1707,7 +1707,9 @@ app.post(`${PREFIX}/api/tts-openai`, requireApiAuth, async (req, res) => {
 app.post(`${PREFIX}/api/dbg`, requireApiAuth, (req, res) => {
   const lines = (req.body && Array.isArray(req.body.lines)) ? req.body.lines : [];
   if (lines.length) {
-    const tag = lines.length > 6 ? lines.slice(0, 6).join(' ⏎ ') + ` …(+${lines.length - 6})` : lines.join(' ⏎ ');
+    // [2026-10-14] 6줄 초과 배치는 앞 6줄만 남기던 탓에 🎙(최종 인식)·에코·질문 판정 줄이 잘려 OpenAI 모드 질문 미인식 원인을 로그로 재구성할 수 없었다 → 핵심 줄은 항상 보존.
+    const _KEY = /🎙|🔇|🔁|질문|의도|STT 오류|권한|끼어|개입|handleInt|더킹|duck/;
+    const tag = lines.length > 6 ? (() => { const head = lines.slice(0, 6), keep = lines.slice(6).filter(l => _KEY.test(l)).slice(0, 20); return head.concat(keep).join(' ⏎ ') + ` …(+${lines.length - 6 - keep.length})`; })() : lines.join(' ⏎ ');
     console.log(`[클라이언트 진단] user=${req.user.username}: ${tag.replace(/\n/g, ' ')}`);
   }
   res.json({ ok: true });
