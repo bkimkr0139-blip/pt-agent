@@ -3297,9 +3297,14 @@ async function resumeFromInterrupted(){
   unduckVol();  // [2026-10-06 사용자 지정] 발화 끝나고 발표 재개 — 볼륨 원복
   interrupted=false;
   document.getElementById('qaBox').style.display='none';
-  setStatus('▶ 발표 재개 — 끊긴 문장의 다음부터');
-  // [2026-10-14 사용자 지시] 끊긴 문장은 다시 읽지 않고 다음 문장부터 재개(마지막 문장이면 playSentenceStream이 다음 슬라이드로 넘긴다)
-  playSentenceStream(curSentenceIdx+1);
+  // [2026-10-14 사용자 지시] 재개 위치 — 끊긴 문장을 50% 이상 재생한 뒤 인터럽트면 다음 문장부터,
+  // 50% 미만이면 그 문장을 처음부터(마지막 문장이면 playSentenceStream이 다음 슬라이드로 넘긴다)
+  let _ratio=0;
+  try{const c=_curSentAudio;if(c&&c.idx===curSentenceIdx&&c.el&&isFinite(c.el.duration)&&c.el.duration>0)_ratio=c.el.currentTime/c.el.duration}catch(e){}
+  const _next=_ratio>=0.5;
+  dbg('▶ 재개 위치 — 문장 '+(curSentenceIdx+1)+' '+Math.round(_ratio*100)+'% 재생 → '+(_next?'다음 문장부터':'문장 처음부터'));
+  setStatus('▶ 발표 재개 — '+(_next?'끊긴 문장의 다음부터':'끊긴 문장부터 다시'));
+  playSentenceStream(curSentenceIdx+(_next?1:0));
 }
 function pauseForBackgroundTalk(){
   if(!playing||interrupted)return;
@@ -3325,7 +3330,7 @@ function resumeFromBackgroundPause(){
 // handleQA → handleInterruption으로 통합 (중복 제거)
 // [경쟁 상태 수정] 세대 카운터 — 이전 슬라이드의 playSentenceStream 체인이 새 슬라이드 전환 후
 // 잔류 실행돼 화면 렌더링을 밀어내는 것을 방지. presentSlide 호출 시 세대 증가 → 이전 체인은 자동 abort.
-let _playGen=0;
+let _playGen=0;let _curSentAudio=null;
 async function playSentenceStream(idx){
   const gen=_playGen;  // 이 체인의 세대 캡처
   if(!playing||interrupted)return;
@@ -3404,7 +3409,7 @@ async function playSentenceStream(idx){
   }
   // 세대 체크 — presentSlide가 다시 호출됐으면 이 체인은 폐기
   if(gen!==_playGen){console.log('stale chain aborted, slide',curSlideIdx);return}
-  if(url){noteSpoken(sentences[idx]);await playAudio(url)}
+  if(url){noteSpoken(sentences[idx]);const _pp=playAudio(url);_curSentAudio={el:audioEl,idx,gen:_playGen};await _pp}  // [2026-10-14] 재개 위치 판정용 — 이 문장을 재생하는 Audio 요소 보관(pause 후에도 currentTime 유지)
   else{setStatus('⚠ 문장 '+(idx+1)+' 음성 생성 실패 — 자막으로 확인해 주세요');qaLog('sentence_tts_fail',{idx:idx+1,chars:(sentences[idx]||'').length});dbg('⚠ 문장 '+(idx+1)+' 음성 실패 — 스킵(브라우저 음성 금지)')}  // [2026-10-05] 정책 확장(사용자 지정): 브라우저 폴백 음성 원천 금지 — 이국 억양·중국계 발음이 어디서도 나오지 않게. 자막에 원문이 있으므로 스킵하고 다음 문장으로
   if(interrupted)return;
   if(gen!==_playGen)return;
