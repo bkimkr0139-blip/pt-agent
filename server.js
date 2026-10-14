@@ -308,14 +308,12 @@ function initPagers(){
 initPagers();
 // 문서 탭 안의 서브탭(전체 시스템 문서 ↔ 모델 교체 평가 문서) — 보기 전환 + 다운로드 버튼 동기화
 function docTab(name){
-  const sys=name==='sys';
   document.querySelectorAll('.docTab').forEach(b=>b.classList.toggle('on',b.dataset.doc===name));
-  const s=document.getElementById('docSys'),e=document.getElementById('docEval');
-  if(s)s.style.display=sys?'block':'none';
-  if(e)e.style.display=sys?'none':'block';
-  const dlS=document.getElementById('dlSys'),dlE=document.getElementById('dlEval');
-  if(dlS)dlS.style.display=sys?'':'none';
-  if(dlE)dlE.style.display=sys?'none':'';
+  [['sys','docSys','dlSys'],['eval','docEval','dlEval'],['voice','docVoice','dlVoice']].forEach(([k,v,d])=>{
+    const ve=document.getElementById(v),de=document.getElementById(d);
+    if(ve)ve.style.display=(k===name)?'block':'none';
+    if(de)de.style.display=(k===name)?'':'none';
+  });
   return false;
 }
 addEventListener('DOMContentLoaded',()=>{const h=decodeURIComponent(location.hash.slice(1));
@@ -446,18 +444,22 @@ function docsPanel() {
   const readDoc = f => { try { return mdToHtml(fs.readFileSync(path.join(__dirname, f), 'utf8')); } catch (e) { return '<p>문서를 읽을 수 없습니다: ' + esc(String(e.message || e)) + '</p>'; } };
   const sysHtml = readDoc('docs/system.md');
   const evalHtml = readDoc('docs/model-eval.md');
+  const voiceHtml = readDoc('docs/voice-agent.md');
   return `<div class="box wide">
 <h1>📄 시스템 문서</h1>
 <p style="color:#9a9ea8;font-size:.82rem;margin:6px 0 0">문서를 화면에서 바로 읽을 수 있습니다. 다운로드는 읽는 시점의 살아있는 상태(TTS 정책·무결 감시 결과·패치 대기열)를 스냅샷 부록으로 덧붙여 내려줍니다.</p>
 <div class="docTabs">
 <button class="docTab on" data-doc="sys" onclick="return docTab('sys')">📘 전체 시스템 문서</button>
 <button class="docTab" data-doc="eval" onclick="return docTab('eval')">🔄 모델 교체 평가 문서</button>
+<button class="docTab" data-doc="voice" onclick="return docTab('voice')">🎙️ 음성에이전트 구성</button>
 <span style="flex:1"></span>
 <a class="docDl" id="dlSys" href="${PREFIX}/admin/system-docs" download>⬇️ 다운로드 (.md)</a>
 <a class="docDl" id="dlEval" href="${PREFIX}/admin/model-eval-docs" download style="display:none">⬇️ 다운로드 (.md)</a>
+<a class="docDl" id="dlVoice" href="${PREFIX}/admin/voice-agent-docs" download="음성에이전트구성.md" style="display:none">⬇️ 음성에이전트구성.md</a>
 </div>
 <div class="docView show" id="docSys">${sysHtml}</div>
 <div class="docView" id="docEval" style="display:none">${evalHtml}</div>
+<div class="docView" id="docVoice" style="display:none">${voiceHtml}</div>
 </div>`;
 }
 
@@ -1037,6 +1039,51 @@ app.get(`${PREFIX}/admin/system-docs`, requireAdmin, (req, res) => {
   const fname = encodeURIComponent(`pt-agent-시스템문서-${stamp}.md`);
   res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="pt-agent-system-docs-${stamp}.md"; filename*=UTF-8''${fname}`);
+  res.send(out);
+});
+// [2026-10-14, 사용자 요청] 「음성에이전트구성.md」 — LLM·STT·TTS·프롬프팅·RAG·사람다운 음성·검증 방법 문서 다운로드.
+// 정적 문서(docs/voice-agent.md)에 다운로드 시점의 실제 설정 스냅샷(스택 레지스트리·TTS 정책·음향 대역·등록 문구 수)을 덧붙인다.
+app.get(`${PREFIX}/admin/voice-agent-docs`, requireAdmin, (req, res) => {
+  let doc;
+  try { doc = fs.readFileSync(path.join(__dirname, 'docs/voice-agent.md'), 'utf8'); }
+  catch { return res.status(500).send('문서 파일(docs/voice-agent.md)을 찾을 수 없습니다.'); }
+  const p2 = n => String(n).padStart(2, '0');
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}`;
+  const snap = [];
+  const readJ = f => JSON.parse(fs.readFileSync(f, 'utf8'));
+  try {
+    const r = readJ(path.join(__dirname, 'eval/registry.json'));
+    snap.push(`- 스택: LLM ${r.llm?.current || '?'} / STT(검증용) ${r.stt?.current || '?'} / TTS ${r.tts?.current_model || '?'} (${r.tts?.current_voice || ''})`);
+  } catch { snap.push('- 스택 레지스트리: 읽기 실패'); }
+  try {
+    const p = readJ('/Users/wizbase/works/bc-ai/tts_policy.json');
+    snap.push(`- TTS 정책: v${p.version} (${p.updated_by}, ${p.updated}) — attempts ${p.attempts}, temp 사다리 ${JSON.stringify(p.temp_ladder)}, floor_mult ${p.floor_mult}, cap_mult ${p.cap_mult}, 클라 타임아웃 ${p.client_tts_timeout_ms}ms`);
+  } catch { snap.push('- TTS 정책: 읽기 실패'); }
+  try {
+    const b = readJ('/Users/wizbase/works/bc-ai/tts_acoustic_bands.json');
+    const keys = Object.keys(b).filter(k => !k.startsWith('_'));
+    snap.push(`- 음향 게이트 대역 등록 보이스: ${keys.join(', ')}`);
+  } catch { snap.push('- 음향 게이트 대역: 읽기 실패'); }
+  try {
+    const n = fs.readdirSync(TTS_CACHE_DIR).filter(f => f.endsWith('.wav')).length;
+    snap.push(`- OpenAI TTS 결정적 캐시: ${n}개 (data/tts-cache)`);
+  } catch { snap.push('- OpenAI TTS 캐시: 없음'); }
+  try {
+    const lines = fs.readFileSync(path.join(__dirname, 'eval/qa_log.jsonl'), 'utf8').trim().split('\n');
+    const recs = lines.slice(-2000).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const ans = recs.filter(r => r.state === 'answer');
+    const by = {}; for (const a of ans) by[a.source || a.engine || '?'] = (by[a.source || a.engine || '?'] || 0) + 1;
+    snap.push(`- 최근 Q&A 기록(최대 2000행): 답변 ${ans.length}건, 출처/엔진 분포 ${JSON.stringify(by)}`);
+  } catch { snap.push('- Q&A 기록: 없음'); }
+  try {
+    const rows = db.prepare('SELECT COUNT(*) n, SUM(origin=\'auto\') a FROM documents').get();
+    snap.push(`- 지식 문서: ${rows.n}건 (자동 습득 ${rows.a || 0}건)`);
+  } catch { /* 생략 */ }
+  const out = doc + `\n---\n\n## 부록: 다운로드 시점 구성 스냅샷 (${stamp} ${p2(now.getHours())}:${p2(now.getMinutes())} KST)\n\n${snap.join('\n')}\n`;
+  const fname = encodeURIComponent('음성에이전트구성.md');
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="voice-agent-config.md"; filename*=UTF-8''${fname}`);
   res.send(out);
 });
 // [2026-10-04, 사용자 요청] 모델 교체 평가 화면 우측 상단 "평가 시스템 문서" 다운로드.
