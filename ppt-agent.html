@@ -182,6 +182,22 @@ body.fs .main{height:100vh;height:100dvh}
 #dropZone strong{color:var(--txt);font-size:1rem;font-weight:700;display:block;margin-bottom:4px}
 /* 캡션 바 — 슬라이드 하단 두 줄, 오디오 재생과 동기화 */
 /* [2026-10-13 사용자 요청] AI 검색·답변 준비 상태바 — 집중 모드(하단 표시 off)와 무관하게 화면 아래에 항상 표시 */
+/* [2026-10-15] 발표 시작 준비 오버레이 — 대본·음성 준비 동안 "멈춘 게 아니라 준비 중"임을 단계·진행률·예상 시간으로 안내 */
+#startPrep{position:absolute;inset:0;z-index:14;display:none;align-items:center;justify-content:center;background:color-mix(in srgb,var(--bg) 78%,transparent);backdrop-filter:blur(6px)}
+#startPrep.show{display:flex;animation:fadeIn .3s var(--ease)}
+#startPrep.done{opacity:0;transition:opacity .45s var(--ease);pointer-events:none}
+#startPrep .sp-card{width:min(420px,88vw);padding:26px 28px 22px;border-radius:var(--r-l);background:var(--surface);border:1px solid var(--line2);box-shadow:var(--shadow-l);text-align:center}
+#startPrep .sp-title{font-size:1.05rem;font-weight:800;letter-spacing:-.02em;margin-bottom:4px}
+#startPrep .sp-sub{font-size:.8rem;color:var(--mut);margin-bottom:16px;min-height:1.2em}
+#startPrep .sp-steps{display:flex;flex-direction:column;gap:7px;text-align:left;margin:0 auto 16px;max-width:300px}
+#startPrep .sp-step{display:flex;align-items:center;gap:9px;font-size:.84rem;color:var(--mut2);transition:color .25s}
+#startPrep .sp-step i{font-style:normal;width:18px;text-align:center;flex:none}
+#startPrep .sp-step.on{color:var(--txt);font-weight:700}
+#startPrep .sp-step.on i{animation:pulse 1s infinite}
+#startPrep .sp-step.ok{color:var(--ok)}
+#startPrep .sp-bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+#startPrep .sp-fill{height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,var(--pri),var(--pri2));transition:width .5s linear}
+#startPrep .sp-meta{display:flex;justify-content:space-between;margin-top:7px;font-size:.74rem;color:var(--mut)}
 #aiBusy{position:absolute;left:50%;transform:translateX(-50%);bottom:132px;z-index:12;display:none;min-width:260px;max-width:min(92%,560px);padding:10px 18px 12px;border-radius:12px;background:rgba(8,11,18,.94);border:1px solid var(--pri2,#4f8cff);box-shadow:0 6px 24px rgba(0,0,0,.45);color:#e8eefc;text-align:center;pointer-events:none}
 #aiBusy.show{display:block}
 #aiBusy .ab-row{display:flex;align-items:center;justify-content:center;gap:8px;font-size:.9rem;font-weight:600}
@@ -324,6 +340,17 @@ body.fs .main{height:100vh;height:100dvh}
         <div class="si-bar"><div class="si-bar-fill"></div></div>
       </div>
     </div>
+    <div id="startPrep" role="status" aria-live="polite"><div class="sp-card">
+      <div class="sp-title">🎤 발표를 준비하고 있어요</div>
+      <div class="sp-sub" id="spSub">잠시만 기다려 주세요 — 멈춘 것이 아닙니다</div>
+      <div class="sp-steps">
+        <div class="sp-step" id="spS1"><i>⏳</i><span>발표 대본 정리</span></div>
+        <div class="sp-step" id="spS2"><i>⏳</i><span>첫 문장 음성 만들기</span></div>
+        <div class="sp-step" id="spS3"><i>⏳</i><span>발표 시작</span></div>
+      </div>
+      <div class="sp-bar"><div class="sp-fill" id="spFill"></div></div>
+      <div class="sp-meta"><span id="spPct">0%</span><span id="spEta"></span></div>
+    </div></div>
     <div id="aiBusy" role="status" aria-live="polite"><div class="ab-row"><span class="ab-dot"></span><span id="aiBusyMsg"></span><span class="ab-sec" id="aiBusySec"></span></div><div class="ab-bar"><div class="ab-fill"></div></div></div>
     <div class="ctrlBar hidden" id="ctrlBar">
       <button class="ctrBtn" id="btnPrev">⏮</button>
@@ -3565,7 +3592,7 @@ async function playSentenceStream(idx){
   }
   // 세대 체크 — presentSlide가 다시 호출됐으면 이 체인은 폐기
   if(gen!==_playGen){console.log('stale chain aborted, slide',curSlideIdx);return}
-  if(url){noteSpoken(sentences[idx]);const _pp=playAudio(url);_curSentAudio={el:audioEl,idx,gen:_playGen};await _pp}  // [2026-10-14] 재개 위치 판정용 — 이 문장을 재생하는 Audio 요소 보관(pause 후에도 currentTime 유지)
+  if(url){noteSpoken(sentences[idx]);if(_sp){startPrepStage(3);setTimeout(startPrepEnd,250)}const _pp=playAudio(url);_curSentAudio={el:audioEl,idx,gen:_playGen};await _pp}  // [2026-10-14] 재개 위치 판정용 — 이 문장을 재생하는 Audio 요소 보관(pause 후에도 currentTime 유지)
   else{setStatus('⚠ 문장 '+(idx+1)+' 음성 생성 실패 — 자막으로 확인해 주세요');qaLog('sentence_tts_fail',{idx:idx+1,chars:(sentences[idx]||'').length});dbg('⚠ 문장 '+(idx+1)+' 음성 실패 — 스킵(브라우저 음성 금지)')}  // [2026-10-05] 정책 확장(사용자 지정): 브라우저 폴백 음성 원천 금지 — 이국 억양·중국계 발음이 어디서도 나오지 않게. 자막에 원문이 있으므로 스킵하고 다음 문장으로
   if(interrupted)return;
   if(gen!==_playGen)return;
@@ -3646,6 +3673,7 @@ if(!playing)return;
 // playSentenceStream이 같은 문장을 또 fetch하는 중복 호출이 발생했었다.
 if(!s._audioCache)s._audioCache={};
 dbg('슬라이드 '+(idx+1)+' 재생 — 문장 '+sentences.length+'개');
+if(_sp)startPrepStage(2);
 sentences.forEach((text,i)=>getSlideAudio(s,i,text));
 prefetchNextSlide(idx);  // [2026-10-04 v5] 본 슬라이드 문장이 큐에 등록된 '뒤'에 다음 슬라이드 프리페치 — 큐 선점 방지. 재생 시간(수십 초) 동안 스크립트/TTS가 미리 끝난다.
 await playSentenceStream(0)}
@@ -3918,11 +3946,48 @@ function unlockAudio(){
   try{if(speechSynthesis&&speechSynthesis.speaking){/* 이미 말하는 중이면 건드리지 않음 */}}catch(e){}
   dbg('오디오 잠금 해제 시도');
 }
+
+// ── [2026-10-15] 발표 시작 준비 안내 ─────────────────────────────────────────────────────
+// 대본 정리 + 첫 문장 음성 합성(콜드 스타트 시 10~15초)이 끝나기 전까지는 소리가 없어 침묵/오작동으로 오해하기 쉽다.
+// 단계 체크 + 예상 진행률(지난 시작 소요시간 이동평균 기반) + 남은 시간으로 "곧 시작"을 알린다. 첫 문장 재생 시 자동 종료.
+let _sp=null;
+function startPrepBegin(){
+  const el=document.getElementById('startPrep');if(!el)return;
+  let exp=11000;try{const v=+localStorage.getItem('ptPrepMs');if(v>2000&&v<90000)exp=v}catch(e){}
+  startPrepEnd(true);
+  _sp={t0:Date.now(),exp,stage:1,tick:null};
+  el.classList.remove('done');el.classList.add('show');
+  [1,2,3].forEach(i=>{const e=document.getElementById('spS'+i);e.className='sp-step'+(i===1?' on':'');e.firstChild.textContent=i===1?'⏳':'○'});
+  const upd=()=>{if(!_sp)return;const t=Date.now()-_sp.t0,r=t/_sp.exp;
+    const pct=Math.min(95,Math.round(100*(1-Math.exp(-1.6*r))));   // 예상 시간에 ~80%, 이후 95%까지 점근 — 100%는 실제 재생 시작에서만
+    document.getElementById('spFill').style.width=pct+'%';document.getElementById('spPct').textContent=pct+'%';
+    const left=Math.max(0,Math.round((_sp.exp-t)/1000));
+    document.getElementById('spEta').textContent=r<0.9?('약 '+Math.max(left,1)+'초 남음'):(r<1.6?'거의 다 됐어요':'조금 더 걸리고 있어요 ('+Math.round(t/1000)+'초)');
+    document.getElementById('spSub').textContent=r<1.6?'잠시만 기다려 주세요 — 멈춘 것이 아닙니다':'서버가 바쁜 중입니다 — 계속 준비 중이니 그대로 기다려 주세요'};
+  upd();_sp.tick=setInterval(upd,500);const _me=_sp;setTimeout(()=>{if(_sp===_me)startPrepEnd(true)},120000);  // 안전장치 — 어떤 경로로도 120초 넘게 남지 않게
+}
+function startPrepStage(n){ // 2: 대본 완료→음성 합성 중, 3: 재생 직전
+  if(!_sp||n<=_sp.stage)return;_sp.stage=n;
+  for(let i=1;i<=3;i++){const e=document.getElementById('spS'+i);
+    if(i<n){e.className='sp-step ok';e.firstChild.textContent='✓'}else if(i===n){e.className='sp-step on';e.firstChild.textContent='⏳'}}
+}
+function startPrepEnd(quiet){
+  const el=document.getElementById('startPrep');
+  if(_sp){clearInterval(_sp.tick);
+    if(!quiet){const dt=Date.now()-_sp.t0;try{const old=+localStorage.getItem('ptPrepMs')||dt;localStorage.setItem('ptPrepMs',String(Math.round(old*0.6+Math.min(dt,60000)*0.4)))}catch(e){}
+      dbg('⏱ 발표 시작 준비 '+(dt/1000).toFixed(1)+'초');
+      for(let i=1;i<=3;i++){const e=document.getElementById('spS'+i);e.className='sp-step ok';e.firstChild.textContent='✓'}
+      document.getElementById('spFill').style.width='100%';document.getElementById('spPct').textContent='100%';document.getElementById('spEta').textContent='시작합니다!';}
+    _sp=null;
+    if(el&&!quiet){el.classList.add('done');setTimeout(()=>{el.classList.remove('show','done')},500);return}
+  }
+  if(el&&quiet){el.classList.remove('show','done')}
+}
 async function startPresentation(){
 if(!acquirePresLock()){setStatus('⚠ 다른 창/탭에서 발표 진행 중 — 그 창을 닫거나 정지한 뒤 시작하세요');dbg('⚠ 발표 시작 거부 — 다른 창 락 보유 중('+((_presLockGet()||{}).id)+')');return}
 ConvMgr.reset();
 dbg('=== 발표 시작 (엔진:'+(ttsEngine==='local'?'로컬/'+ttsVoice:'OpenAI')+(micCmdEnabled?', 마이크 켬':', 마이크 끔')+') win='+_WIN_ID);
-unlockAudio();
+unlockAudio();startPrepBegin();
 playing=true;interrupted=false;_presStarted=true;document.getElementById('btnPlay').textContent='⏸';await enterFS();if(micCmdEnabled)startListening();  // [2026-10-04] 음성 명령이 꺼져 있으면 마이크 아예 안 켬 — 배경대화 감지로 발표가 멈추는 일 원천 차단
 if(!hudBottom)setTimeout(()=>{const b=document.getElementById('ctrlBar');if(b&&playing)b.classList.add('hidden')},3000);  // [2026-10-06] 집중 모드 — 시작 3초 후 컨트롤바 자동 숨김(마우스를 안 움직여도)
 pregenPhrases();  // [2026-10-05] Q&A 문구 프리생성을 발표 '시작'으로 이동 — 기존엔 await presentSlide 뒤(=발표 종료 후)에 있어 발표 내내 캐시가 빈 상태로 첫 질문 시 설정 음성 생성을 기다려야 했다. 백그라운드(fire-and-forget)라 재생을 막지 않는다.
@@ -3936,8 +4001,8 @@ let _scriptChain=Promise.resolve();
 slides.forEach((_,i)=>{_scriptChain=_scriptChain.then(()=>ensureScript(i)).catch(()=>{})});
 await presentSlide(Math.max(curSlideIdx,0));
 }  // [2026-10-05] pregenPhrases 호출은 발표 '시작' 지점으로 이동 (아래 발표 종료 후 실행이던 호출은 발표 내내 캐시가 빈 원인이었다)
-function pausePresentation(){playing=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('일시정지');if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}  // [2026-10-04 v9] _audioFin 즉시 해제 — 120s 고아 감시자 방지
-function stopAll(){aiBusyEnd();playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);unduckVol();_deferQA=null;_deferPending=[];_deferAskedAt=0;_pendingQ=null;_qaGen++;_lastQ='';_answeringQKey='';_answeringQRaw='';_lastFinalKey='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring'||qaState==='holding'||qaState==='confirming_continue')qaState='idle';clearTimeout(_holdTimer);clearTimeout(_continueSilenceTimer);resolveDeferred(false);setStatus('정지')}  // [2026-10-07 v10] 재접수 폐기 키도 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
+function pausePresentation(){startPrepEnd(true);playing=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('일시정지');if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}  // [2026-10-04 v9] _audioFin 즉시 해제 — 120s 고아 감시자 방지
+function stopAll(){aiBusyEnd();startPrepEnd(true);playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);unduckVol();_deferQA=null;_deferPending=[];_deferAskedAt=0;_pendingQ=null;_qaGen++;_lastQ='';_answeringQKey='';_answeringQRaw='';_lastFinalKey='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring'||qaState==='holding'||qaState==='confirming_continue')qaState='idle';clearTimeout(_holdTimer);clearTimeout(_continueSilenceTimer);resolveDeferred(false);setStatus('정지')}  // [2026-10-07 v10] 재접수 폐기 키도 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
 // ── 마지막 슬라이드 발표 완료 → Q&A 시간 → URL 열기 ──
 let _closingTimer=null;
 function extractURL(){
