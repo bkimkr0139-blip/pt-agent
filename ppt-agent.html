@@ -599,10 +599,14 @@ let _syncCorrIdx=0;
 // 목소리 통일 — 모든 발화를 OpenAI TTS(nova)로, 프리페치 캐시로 침묵 최소화
 let promptCache={};
 // [2026-10-13 사용자 지시] 마무리: "질문 있으신가요?"를 묻고 응답을 충분히 기다린 뒤, 질문이 없으면 "…제 발표는 마치겠습니다. 경청해 주셔서 감사합니다."로 끝낸다(묻자마자 끝인사까지 말해 버리면 질문할 틈이 없다)
-const CLOSING_ASK='제가 준비한 발표 자료는 여기까지입니다. 질문 있으신가요?';
+// [2026-10-15 사용자 지시] 마지막 슬라이드 끝에 "이상으로 준비한 발표를 마치겠습니다."가 절대 누락되면 안 된다(이후 청중 질문이 이어진다).
+// 스크립트 LLM은 끝인사를 쓰지 못하게 돼 있어(프롬프트 규칙) 이 문장은 여기서 고정 멘트로 반드시 낸다 — speakUnified must 모드(생성 대기 연장·1회 재시도).
+const CLOSING_DONE='이상으로 준비한 발표를 마치겠습니다.';
+const CLOSING_ASK='질문 있으신가요?';
 const CLOSING_END='더 이상 질문이 없으시면 제 발표는 마치겠습니다. 경청해 주셔서 감사합니다.';
-const CLOSING_WAIT_MS=6000,CLOSING_AFTER_ANSWER_MS=10000;  // 첫 질문 대기 / 답변 뒤 추가 질문 대기(사용자 음성이 감지되면 연장)
-const CACHED_PHRASES=['질문해 주세요.','어떤 부분을 말씀하시는 건지 조금 더 구체적으로 말씀해 주시겠어요?','이 내용은 뒤쪽 장표에서도 다시 설명드리겠습니다. 발표를 이어가겠습니다.','앞서 말씀드린 내용과 연결되는 부분입니다. 이어서 설명드리겠습니다.','질문하신 부분까지 설명드렸습니다. 이어서 말씀드리겠습니다.','혹시 다른 질문 없으시면 계속 발표해도 될까요?','계속 진행할까요?','계속 발표합니다.','다시 발표해도 될까요?','알겠습니다. 이어서 발표하겠습니다.','알겠습니다. 다음 장표로 넘어가겠습니다.','말씀해 주세요.','좋은 질문입니다.','잠시 확인해 보겠습니다.','질문이 없으시면 계속 진행하겠습니다.','더 질문 있으신가요?','질문 있으신가요?','답변 드리겠습니다.','확인해 보겠습니다.','알겠습니다, 잠시만요.','바로 답변 드릴게요.','관련 내용을 찾아보고 있습니다. 잠시만 기다려 주세요.','자료를 확인 중입니다. 조금만 더 기다려 주세요.','문제를 기록했습니다.','계속 발표할까요?','관련 지식이 아직 없습니다.','먼저 발표를 진행하고, 제 에이전트가 관련 지식을 찾아 답변드리겠습니다.','답변은 화면에 표시되어 있습니다.','관련 지식을 찾지 못했습니다. 죄송합니다.','아직 관련 지식을 찾고 있습니다. 찾는 대로 말씀드리겠습니다.','관련 정보가 없어서 지금은 제가 답변드릴 수 없습니다.','관련 정보가 없어서 지금은 제가 답변드릴 수 없습니다. 죄송합니다.',CLOSING_ASK,CLOSING_END];  // [2026-10-05 v6.1] 지연 답변 통보 2구문(원인+계획 포함 — "무작정 답변 못 한다"고만 하지 않는다). 제안 멘트("조금 전에 질문하신 OOO에 대하여…")는 질문 내용을 담는 동적 문장이라 ready 시점에 개별 프리생성한다  // [2026-10-05 v2] "네," 접두 전부 제거 — 실측으로 "네,"로 시작하면 모델이 "네"에서 조기 EOS(프록시 REJECT→SPLIT→FAIL 8.6~19.8s, FAIL-FINAL로 캐시 영구 미스 → 질문해도 무음). 제거본은 0.5s 일률 1회 성공(15:4x 전수 실측). PLAIN_FILLERS 4종+시간벌기 추임새 2종+일시정지·확인 멘트+문제기록 확인 멘트+배경대화 재개 확인
+const CLOSING_WAIT_MS=12000,CLOSING_AFTER_ANSWER_MS=12000;  // [2026-10-15] 6s/10s→12s/12s: 청중이 반응·발화를 시작하고 STT 최종 결과가 도착하기엔 6초가 짧아 "질문 있으신가요?" 직후 질문을 받기 전에 마쳐 버렸다
+//   // 첫 질문 대기 / 답변 뒤 추가 질문 대기(사용자 음성이 감지되면 연장)
+const CACHED_PHRASES=['질문해 주세요.','어떤 부분을 말씀하시는 건지 조금 더 구체적으로 말씀해 주시겠어요?','이 내용은 뒤쪽 장표에서도 다시 설명드리겠습니다. 발표를 이어가겠습니다.','앞서 말씀드린 내용과 연결되는 부분입니다. 이어서 설명드리겠습니다.','질문하신 부분까지 설명드렸습니다. 이어서 말씀드리겠습니다.','혹시 다른 질문 없으시면 계속 발표해도 될까요?','이상으로 준비한 발표를 마치겠습니다.','계속 진행할까요?','계속 발표합니다.','다시 발표해도 될까요?','알겠습니다. 이어서 발표하겠습니다.','알겠습니다. 다음 장표로 넘어가겠습니다.','말씀해 주세요.','좋은 질문입니다.','잠시 확인해 보겠습니다.','질문이 없으시면 계속 진행하겠습니다.','더 질문 있으신가요?','질문 있으신가요?','답변 드리겠습니다.','확인해 보겠습니다.','알겠습니다, 잠시만요.','바로 답변 드릴게요.','관련 내용을 찾아보고 있습니다. 잠시만 기다려 주세요.','자료를 확인 중입니다. 조금만 더 기다려 주세요.','문제를 기록했습니다.','계속 발표할까요?','관련 지식이 아직 없습니다.','먼저 발표를 진행하고, 제 에이전트가 관련 지식을 찾아 답변드리겠습니다.','답변은 화면에 표시되어 있습니다.','관련 지식을 찾지 못했습니다. 죄송합니다.','아직 관련 지식을 찾고 있습니다. 찾는 대로 말씀드리겠습니다.','관련 정보가 없어서 지금은 제가 답변드릴 수 없습니다.','관련 정보가 없어서 지금은 제가 답변드릴 수 없습니다. 죄송합니다.',CLOSING_ASK,CLOSING_END];  // [2026-10-05 v6.1] 지연 답변 통보 2구문(원인+계획 포함 — "무작정 답변 못 한다"고만 하지 않는다). 제안 멘트("조금 전에 질문하신 OOO에 대하여…")는 질문 내용을 담는 동적 문장이라 ready 시점에 개별 프리생성한다  // [2026-10-05 v2] "네," 접두 전부 제거 — 실측으로 "네,"로 시작하면 모델이 "네"에서 조기 EOS(프록시 REJECT→SPLIT→FAIL 8.6~19.8s, FAIL-FINAL로 캐시 영구 미스 → 질문해도 무음). 제거본은 0.5s 일률 1회 성공(15:4x 전수 실측). PLAIN_FILLERS 4종+시간벌기 추임새 2종+일시정지·확인 멘트+문제기록 확인 멘트+배경대화 재개 확인
 // [2026-10-05] RAG 미스 정직 거절 멘트 — 참고자료가 아예 없으면 LLM을 돌리지 않고 이대로 답변한다.
 // 사용자 지시: "로컬 LLM의 한계이므로 RAG에 없는 답변을 못한다는 점을 밝히도록". 약한 참조(스코어
 // 0.3 미만)는 기존대로 [주의] 프롬프트와 함께 LLM 답변을 유지 — 완전 미스만 거절로 전환.
@@ -630,7 +634,7 @@ async function pregenPhrases(){
   }
   console.log('프리페치 완료:',Object.keys(promptCache).length,'개');
 }
-async function speakUnified(text){
+async function speakUnified(text,must){
   if(!text)return;
   unduckVol();  // [2026-10-06 사용자 지정] 시스템 발화 시작 — 원래 볼륨으로 회복해 답변
   noteSpoken(text);  // 에코 방지용 기록
@@ -642,7 +646,8 @@ async function speakUnified(text){
   // 못 나오면 음성 없이 상태 바 텍스트로 대체. 늦게 완성된 음성은 캐시에 적재해 다음엔 즉시 재생.
   const _t0=Date.now();
   const gen=enqueueTts(text,true,null,true).then(v=>{if(v){promptCache[text]=v;return v}return null}).catch(()=>null);  // v=true — 발화 언어 역검증(프록시) 대상
-  u=await Promise.race([gen,new Promise(r=>setTimeout(()=>r(null),QA_TTS_WAIT_MS))]);
+  u=await Promise.race([gen,new Promise(r=>setTimeout(()=>r(null),must?Math.max(QA_TTS_WAIT_MS,30000):QA_TTS_WAIT_MS))]);
+  if(!u&&must){dbg('⚠ 필수 멘트 음성 지연 — 1회 재시도: '+text.slice(0,20));u=await Promise.race([enqueueTts(text,true,null,true).then(v=>{if(v)promptCache[text]=v;return v||null}).catch(()=>null),new Promise(r=>setTimeout(()=>r(null),30000))])}  // [2026-10-15] 필수 멘트(끝인사 등)는 침묵·텍스트 대체로 누락시키지 않는다
   qaLog('unified_tts',{phrase:text.slice(0,40),wait_ms:Date.now()-_t0,ok:!!u});
   if(u)return playAudio(u);
   dbg('⚠ 설정 음성 생성 지연 — 텍스트 대체: '+text.slice(0,20));
@@ -1969,7 +1974,12 @@ recognizer.onresult=e=>{
     // ── 발표 후 Q&A 시간 (마지막 슬라이드 완료 후) ──
     if(qaState==='closing_qa'){
       clearTimeout(_closingTimer);
-      if(/없어|없습니다|아니요|아뇨|괜찮|좋아요|네 네|그래요|진행|시작|이동|ok|go|next/i.test(t)){
+      // [2026-10-15] 끝인사 재생 중 청중이 말하면 마무리를 취소하고 질문으로 받는다(finishPresentation의 _finishTok)
+      if(_finishing){_finishTok++;_finishing=false;try{if(audioEl){audioEl.pause();audioEl=null}}catch(e){};ttsSpeaking=false}
+      // [2026-10-15] 종료 의사 판정 — 짧고 질문이 아닌 발화일 때만. 기존엔 '진행·시작·이동·go·ok'가 어디에 들어 있든(예: "신청 진행은 어떻게 하나요",
+      // "google", "token") 질문을 종료 의사로 오인해 질문을 받지 않고 발표를 마쳤다.
+      const _qLike=intent==='question'||intent==='intent'||/[?？]|(까요|나요|가요|뭐|어떻|어떤|무슨|무엇|왜|언제|어디|누가|몇|얼마)/.test(t);
+      if(!_qLike&&t.replace(/\s/g,'').length<=14&&/(없어|없습니다|아니요|아뇨|괜찮|좋아요|네\s?네|그래요|진행해|이동|시작해|그만|끝내|마치|넘어)|(^|[^a-z])(ok|go|next)([^a-z]|$)/i.test(t)){
         finishPresentation();
         return;
       }
@@ -3614,6 +3624,7 @@ async function playSentenceStream(idx){
   // 세대 체크 — presentSlide가 다시 호출됐으면 이 체인은 폐기
   if(gen!==_playGen){console.log('stale chain aborted, slide',curSlideIdx);return}
   if(url){noteSpoken(sentences[idx]);if(_sp){startPrepStage(3);setTimeout(startPrepEnd,250)}const _pp=playAudio(url);_curSentAudio={el:audioEl,idx,gen:_playGen};await _pp}  // [2026-10-14] 재개 위치 판정용 — 이 문장을 재생하는 Audio 요소 보관(pause 후에도 currentTime 유지)
+  else if(curSlideIdx===slides.length-1&&idx>=sentences.length-1){dbg('⚠ 마지막 문장 음성 실패 — 필수 멘트 경로로 재생');await speakUnified(sentences[idx],true)}  // [2026-10-15] 발표 마지막 문장은 누락 금지(이후 청중 질문이 이어진다)
   else{setStatus('⚠ 문장 '+(idx+1)+' 음성 생성 실패 — 자막으로 확인해 주세요');qaLog('sentence_tts_fail',{idx:idx+1,chars:(sentences[idx]||'').length});dbg('⚠ 문장 '+(idx+1)+' 음성 실패 — 스킵(브라우저 음성 금지)')}  // [2026-10-05] 정책 확장(사용자 지정): 브라우저 폴백 음성 원천 금지 — 이국 억양·중국계 발음이 어디서도 나오지 않게. 자막에 원문이 있으므로 스킵하고 다음 문장으로
   if(interrupted)return;
   if(gen!==_playGen)return;
@@ -4050,7 +4061,7 @@ function extractURL(){
 function bumpClosingTimer(){
   if(qaState!=='closing_qa'||!_closingTimer)return;
   clearTimeout(_closingTimer);
-  _closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},12000);
+  _closingTimer=setTimeout(()=>{if(qaState==='closing_qa')finishPresentation()},15000);
 }
 async function startClosingQA(){
   playing=false;interrupted=false;
@@ -4059,13 +4070,10 @@ async function startClosingQA(){
   setStatus('💬 질문 & 답변 시간');
   // 마지막 슬라이드의 노트/스크립트에 이미 마무리 멘트가 있으면 그대로 사용
   const lastSlide=slides[slides.length-1];
-  const hasClosingMent=(lastSlide.note||lastSlide.script||'').includes('질문 있');
-  if(!hasClosingMent){
-    // [2026-10-13 사용자 지시] 마무리 멘트: "…제 발표는 마치겠습니다. 경청해 주셔서 감사합니다." — 시연 사이트 이동 언급 제거
-    // "더 이상 질문이 없으시면 마치겠습니다"는 첫 안내에서 한 번만 말하고, 이후 재질문 시엔 반복하지 않음
-    await speakUnified(CLOSING_ASK);
-  }
-  // hasClosingMent=true면 이미 마지막 슬라이드 발표에서 "질문 있으신가요?"를 말했음
+  // [2026-10-15] 실제 낭독된 스크립트만 본다(노트가 아님) — 끝인사와 질문이 둘 다 이미 말해졌을 때만 생략, 그 외엔 항상 고정 멘트로 보장
+  const _spoken=String(lastSlide.script||'');
+  if(!_spoken.includes('마치겠습니다'))await speakUnified(CLOSING_DONE,true);
+  if(!_spoken.includes('질문 있'))await speakUnified(CLOSING_ASK,true);
   qaState='closing_qa';
   // 첫 무응답 대기 — 묻고 나서 잠시 기다린다(사용자 음성 감지 시 bumpClosingTimer가 연장)
   clearTimeout(_closingTimer);
@@ -4073,11 +4081,17 @@ async function startClosingQA(){
     if(qaState==='closing_qa')finishPresentation();
   },CLOSING_WAIT_MS);
 }
+let _finishing=false,_finishTok=0;
 async function finishPresentation(){
   clearTimeout(_closingTimer);
-  qaState='idle';
+  const _wasClosing=qaState==='closing_qa';
+  const _tok=++_finishTok;
+  // [2026-10-15] 끝인사 재생 중에도 closing_qa를 유지 — 그 사이 질문이 들어오면 closing_qa 핸들러가 마무리를 취소(_finishTok)하고 질문으로 받는다
+  qaState=_wasClosing?'closing_qa':'idle';_finishing=_wasClosing;
   // [2026-10-13] 끝인사는 질문이 없음을 확인한 뒤 말한다(재생·생성 대기 상한 포함) — 이동 전에 끝까지 들리게 먼저 재생
   try{setStatus('💬 마무리 인사');await speakUnified(CLOSING_END)}catch(e){}
+  if(_tok!==_finishTok)return;  // 끝인사 중 질문이 들어와 마무리가 취소됨
+  _finishing=false;qaState='idle';
   releasePresLock();  // [2026-10-05] 발표 독점 락 해제 — 다른 창이 발표를 시작할 수 있게
   // [2026-10-05] 세션 종료 요약 — 발화 버퍼에 남은 이벤트(tts_slow·미처 flush 안 된 것)를
   // 누계와 함께 보내 폐루프가 발표 단위 품질 추이를 볼 수 있게 한다.
@@ -4107,7 +4121,7 @@ function goToSlide(idx){
     curSlideIdx=idx;
     renderSlideWhenReady(idx);
     ensureScript(idx).then(ok=>{
-      if(ok)document.getElementById('scriptBox').textContent=slides[idx].script;
+      if(ok){const _sb=document.getElementById('scriptBox');if(_sb)_sb.textContent=slides[idx].script}
     });
   }
 }
