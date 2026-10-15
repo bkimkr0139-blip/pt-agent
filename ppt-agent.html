@@ -1283,6 +1283,11 @@ function scriptToSentences(script){
     return [p];
   };
   const ss=splitSentences(script).map(p=>({t:p.t.replace(/https?:\/\/[^\s<>"']+/g,'').trim(),soft:p.soft})).filter(p=>p.t.length>3).flatMap(expand);
+  // [2026-10-15 사용자 요청] 첫 인사("안녕하세요.")는 따로 발화하면 다음 문장 생성·700ms 휴지 때문에 텀이 길다.
+  // 사전 준비 화면이 생성 시간을 벌어 주므로 인사 + 다음 문장(소개)을 한 덩어리로 합성해 이어서 자연스럽게 말한다.
+  if(ss.length>1&&/^(여러분,?\s*)?안녕하(세요|십니까)(\s*여러분)?[.!]?$/.test(ss[0].t)&&(ss[0].t+' '+ss[1].t).length<=80){
+    ss.splice(0,2,{t:ss[0].t.replace(/[!]/g,'.').replace(/([^.])$/,'$1.')+' '+ss[1].t.replace(/([^.!?])$/,'$1.'),soft:ss[1].soft});
+  }
   return ss.length?ss:[{t:script.replace(/https?:\/\/[^\s<>"']+/g,'').trim()||'발표를 마치겠습니다.',soft:false}];
 }
 // 슬라이드 idx가 "현재 슬라이드"가 되는 순간(=아직 그 슬라이드가 말하는 중인 동안) 바로 다음 슬라이드의
