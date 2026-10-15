@@ -187,8 +187,22 @@ body.fs .main{height:100vh;height:100dvh}
 #startPrep.show{display:flex;animation:fadeIn .3s var(--ease)}
 #startPrep.done{opacity:0;transition:opacity .45s var(--ease);pointer-events:none}
 #startPrep .sp-card{width:min(420px,88vw);padding:26px 28px 22px;border-radius:var(--r-l);background:var(--surface);border:1px solid var(--line2);box-shadow:var(--shadow-l);text-align:center}
-#startPrep .sp-title{font-size:1.05rem;font-weight:800;letter-spacing:-.02em;margin-bottom:4px}
-#startPrep .sp-sub{font-size:.8rem;color:var(--mut);margin-bottom:16px;min-height:1.2em}
+#startPrep .sp-mascot{height:100px;margin:-6px 0 2px}
+#startPrep .sp-body{transform-origin:60px 100px;animation:spBob 1.6s ease-in-out infinite}
+#startPrep .sp-shadow{transform-origin:60px 112px;animation:spShadow 1.6s ease-in-out infinite}
+#startPrep .sp-eyes{transform-origin:60px 64px;animation:spBlink 4s infinite}
+#startPrep .sp-mouth{animation:spMouth 3.2s ease-in-out infinite}
+#startPrep .sp-spark{animation:pulse 1.2s infinite}
+#startPrep .sp-mic{transform-origin:86px 100px;animation:spWave 1.6s ease-in-out infinite}
+@keyframes spBob{0%,100%{transform:translateY(0) rotate(-1.5deg)}50%{transform:translateY(-5px) rotate(1.5deg)}}
+@keyframes spShadow{0%,100%{transform:scaleX(1)}50%{transform:scaleX(.82)}}
+@keyframes spBlink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.1)}}
+@keyframes spMouth{0%,100%{d:path("M52 78q8 7 16 0")}50%{d:path("M53 77q7 11 14 0")}}
+@keyframes spWave{0%,100%{transform:rotate(-6deg)}50%{transform:rotate(8deg)}}
+#startPrep .sp-title{font-size:1.08rem;font-weight:800;letter-spacing:-.02em;margin-bottom:6px}
+#startPrep .sp-sub{font-size:.84rem;color:var(--txt2);margin:0 auto 16px;min-height:2.6em;padding:8px 12px;border-radius:12px;background:var(--pri-bg);border:1px solid var(--pri-bd);max-width:330px;line-height:1.5;transition:opacity .25s}
+#startPrep .sp-sub.fade{opacity:0}
+@media (prefers-reduced-motion:reduce){#startPrep .sp-body,#startPrep .sp-shadow,#startPrep .sp-eyes,#startPrep .sp-mouth,#startPrep .sp-mic,#startPrep .sp-spark{animation:none}}
 #startPrep .sp-steps{display:flex;flex-direction:column;gap:7px;text-align:left;margin:0 auto 16px;max-width:300px}
 #startPrep .sp-step{display:flex;align-items:center;gap:9px;font-size:.84rem;color:var(--mut2);transition:color .25s}
 #startPrep .sp-step i{font-style:normal;width:18px;text-align:center;flex:none}
@@ -341,12 +355,24 @@ body.fs .main{height:100vh;height:100dvh}
       </div>
     </div>
     <div id="startPrep" role="status" aria-live="polite"><div class="sp-card">
-      <div class="sp-title">🎤 발표를 준비하고 있어요</div>
-      <div class="sp-sub" id="spSub">잠시만 기다려 주세요 — 멈춘 것이 아닙니다</div>
+      <div class="sp-mascot" aria-hidden="true"><svg viewBox="0 0 120 120" width="96" height="96">
+        <ellipse cx="60" cy="112" rx="26" ry="5" fill="rgba(0,0,0,.18)" class="sp-shadow"/>
+        <g class="sp-body">
+          <path d="M26 58c0-24 15-40 34-40s34 16 34 40" fill="#3b2a4a"/>
+          <circle cx="60" cy="66" r="34" fill="#ffe0c8"/>
+          <path d="M27 60c4-22 20-32 33-32s29 10 33 32c-9-12-20-17-33-17S36 48 27 60z" fill="#3b2a4a"/>
+          <ellipse cx="45" cy="74" rx="6" ry="4" fill="#ffb3b3" opacity=".75"/><ellipse cx="75" cy="74" rx="6" ry="4" fill="#ffb3b3" opacity=".75"/>
+          <g class="sp-eyes"><ellipse cx="47" cy="64" rx="3.6" ry="4.6" fill="#2a2030"/><ellipse cx="73" cy="64" rx="3.6" ry="4.6" fill="#2a2030"/></g>
+          <path class="sp-mouth" d="M52 78q8 7 16 0" fill="none" stroke="#c0505a" stroke-width="2.6" stroke-linecap="round"/>
+          <path d="M88 40l8-10M92 48l12-4" stroke="#6366f1" stroke-width="3" stroke-linecap="round" class="sp-spark"/>
+          <g class="sp-mic"><rect x="82" y="86" width="9" height="16" rx="4.5" fill="#6366f1"/><circle cx="86.5" cy="84" r="6" fill="#818cf8"/></g>
+        </g></svg></div>
+      <div class="sp-title" id="spTitle">발표자가 준비를 잠깐 할게요 ✨</div>
+      <div class="sp-sub" id="spSub">저도 오늘 발표 잘 하실지 조금 긴장되네요 😅</div>
       <div class="sp-steps">
-        <div class="sp-step" id="spS1"><i>⏳</i><span>발표 대본 정리</span></div>
-        <div class="sp-step" id="spS2"><i>⏳</i><span>첫 문장 음성 만들기</span></div>
-        <div class="sp-step" id="spS3"><i>⏳</i><span>발표 시작</span></div>
+        <div class="sp-step" id="spS1"><i>⏳</i><span>대본 한 번 더 훑어보기 📝</span></div>
+        <div class="sp-step" id="spS2"><i>⏳</i><span>목소리 컨디션 맞추기 🎶</span></div>
+        <div class="sp-step" id="spS3"><i>⏳</i><span>짠! 발표 시작 🎤</span></div>
       </div>
       <div class="sp-bar"><div class="sp-fill" id="spFill"></div></div>
       <div class="sp-meta"><span id="spPct">0%</span><span id="spEta"></span></div>
@@ -3956,19 +3982,32 @@ function unlockAudio(){
 // 대본 정리 + 첫 문장 음성 합성(콜드 스타트 시 10~15초)이 끝나기 전까지는 소리가 없어 침묵/오작동으로 오해하기 쉽다.
 // 단계 체크 + 예상 진행률(지난 시작 소요시간 이동평균 기반) + 남은 시간으로 "곧 시작"을 알린다. 첫 문장 재생 시 자동 종료.
 let _sp=null;
+
+// 마스코트 말풍선 — 진행 단계·경과에 맞춰 유쾌한 멘트를 돌려 보여 준다(한 멘트 3.6초).
+const SP_LINES=['저도 오늘 발표 잘 하실지 조금 긴장되네요 😅','마이크 테스트 하나 둘, 하나 둘~ 🎙️','대본을 한 번 더 훑어보고 있어요 📝','물 한 모금 마시고 목 가다듬는 중이에요 💧','오늘 발표, 왠지 느낌이 좋아요 ✨','자료는 챙겼고… 떨리는 마음도 챙겼고… 😆','청중분들께 멋지게 인사드릴게요 🙌'];
+const SP_SOON=['거의 다 됐어요! 심호흡 한 번만 더~ 😮‍💨','자, 곧 시작합니다! 눈 맞춰 주세요 👀','마지막으로 옷매무새 확인! 짠~ 🎤'];
+const SP_SLOW=['어라, 오늘따라 서버가 느긋하네요 🐢 조금만 더 기다려 주세요 🙏','아직 준비 중이에요. 멈춘 거 아니니까 걱정 마세요 😊','목소리를 곱게 다듬느라 시간이 좀 걸려요 🎶'];
+function spSay(r){
+  if(!_sp)return;const now=Date.now();
+  if(_sp.lastSay&&now-_sp.lastSay<3600)return;
+  const pool=r>=1.6?SP_SLOW:(r>=0.85?SP_SOON:SP_LINES);
+  _sp.n=(_sp.n||0)+1;const msg=(_sp.n===1&&r<0.85)?SP_LINES[0]:pool[(_sp.n+Math.floor(Math.random()*3))%pool.length];
+  _sp.lastSay=now;const el=document.getElementById('spSub');
+  el.classList.add('fade');setTimeout(()=>{el.textContent=msg;el.classList.remove('fade')},220);
+}
 function startPrepBegin(){
   const el=document.getElementById('startPrep');if(!el)return;
   let exp=11000;try{const v=+localStorage.getItem('ptPrepMs');if(v>2000&&v<90000)exp=v}catch(e){}
   startPrepEnd(true);
   _sp={t0:Date.now(),exp,stage:1,tick:null};
-  el.classList.remove('done');el.classList.add('show');
+  el.classList.remove('done');el.classList.add('show');document.getElementById('spTitle').textContent='발표자가 준비를 잠깐 할게요 ✨';
   [1,2,3].forEach(i=>{const e=document.getElementById('spS'+i);e.className='sp-step'+(i===1?' on':'');e.firstChild.textContent=i===1?'⏳':'○'});
   const upd=()=>{if(!_sp)return;const t=Date.now()-_sp.t0,r=t/_sp.exp;
     const pct=Math.min(95,Math.round(100*(1-Math.exp(-1.6*r))));   // 예상 시간에 ~80%, 이후 95%까지 점근 — 100%는 실제 재생 시작에서만
     document.getElementById('spFill').style.width=pct+'%';document.getElementById('spPct').textContent=pct+'%';
     const left=Math.max(0,Math.round((_sp.exp-t)/1000));
     document.getElementById('spEta').textContent=r<0.9?('약 '+Math.max(left,1)+'초 남음'):(r<1.6?'거의 다 됐어요':'조금 더 걸리고 있어요 ('+Math.round(t/1000)+'초)');
-    document.getElementById('spSub').textContent=r<1.6?'잠시만 기다려 주세요 — 멈춘 것이 아닙니다':'서버가 바쁜 중입니다 — 계속 준비 중이니 그대로 기다려 주세요'};
+    spSay(r)};
   upd();_sp.tick=setInterval(upd,500);const _me=_sp;setTimeout(()=>{if(_sp===_me)startPrepEnd(true)},120000);  // 안전장치 — 어떤 경로로도 120초 넘게 남지 않게
 }
 function startPrepStage(n){ // 2: 대본 완료→음성 합성 중, 3: 재생 직전
@@ -3982,7 +4021,7 @@ function startPrepEnd(quiet){
     if(!quiet){const dt=Date.now()-_sp.t0;try{const old=+localStorage.getItem('ptPrepMs')||dt;localStorage.setItem('ptPrepMs',String(Math.round(old*0.6+Math.min(dt,60000)*0.4)))}catch(e){}
       dbg('⏱ 발표 시작 준비 '+(dt/1000).toFixed(1)+'초');
       for(let i=1;i<=3;i++){const e=document.getElementById('spS'+i);e.className='sp-step ok';e.firstChild.textContent='✓'}
-      document.getElementById('spFill').style.width='100%';document.getElementById('spPct').textContent='100%';document.getElementById('spEta').textContent='시작합니다!';}
+      document.getElementById('spFill').style.width='100%';document.getElementById('spPct').textContent='100%';document.getElementById('spEta').textContent='시작합니다!';document.getElementById('spSub').textContent='준비 끝! 그럼 시작해 볼게요 🎉';document.getElementById('spTitle').textContent='짠! 발표 시작합니다 🎤';}
     _sp=null;
     if(el&&!quiet){el.classList.add('done');setTimeout(()=>{el.classList.remove('show','done')},500);return}
   }
