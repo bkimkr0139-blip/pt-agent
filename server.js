@@ -1330,7 +1330,7 @@ app.post(`${PREFIX}/api/search`, requireApiAuth, async (req, res) => {
   if (!rows0.length) return res.json({ refs: [], suspect: null });
   // [2026-10-06] 발음 교정 — noCorrect=1이면 클라이언트가 "아니요"로 확정해 원문으로 재검색하는 경로.
   const corr = noCorrect ? { q: String(query), suspect: null } : correctQuery(query, req.user.id);
-  const qEmb = await embedViaN8n(corr.q);
+  const qEmb = await embedViaN8n(ragLib.expandQuery(corr.q));  // [2026-10-15] 상투구 제거·측면어 확장 질의로 임베딩(lib/rag.js expandQuery)
   if (!qEmb) return res.json({ refs: [], suspect: corr.suspect });
   const rows = rows0.map(r => {
     let meta = {}; try { meta = r.meta ? JSON.parse(r.meta) : {}; } catch { /* 손상 메타는 빈 값 */ }
@@ -1394,6 +1394,9 @@ app.get(`${PREFIX}/api/stt/health`, requireApiAuth, async (req, res) => {
 const KNOW_LEDGER = path.join(__dirname, 'eval', 'knowledge.jsonl');
 const KNOW_DISMISS = path.join(__dirname, 'eval', 'knowledge-dismissed.jsonl');
 const CONF_MANUAL = 1.0, CONF_AUTO = 0.5, CONF_AUTO_UNCERTAIN = 0.3;
+// [2026-10-15 사용자 지시] 자동 습득 기능 일시 중단 — 자동학습 문서가 검색을 오염시키고 답변이 상식선으로 새는 원인이었다.
+// RAG(첨부 문서) 우선 답변으로 단일화. 재개하려면 환경변수 KNOW_ACQUIRE=1.
+const KNOW_ACQUIRE_ENABLED = process.env.KNOW_ACQUIRE === '1';
 const _knowInFlight = new Set(); // 같은 질문 중복 습득 방지(발표 중 연속 거절·콘솔 동시 클릭)
 const normQ = q => String(q || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 120);
 const knowName = q => '자동학습: ' + normQ(q);
@@ -1477,6 +1480,7 @@ async function volatileAnswer(q) {
 async function acquireKnowledge(userId, q, opts = {}) {
   const nq = normQ(q);
   if (!nq) return { ok: false, reason: 'empty' };
+  if (!KNOW_ACQUIRE_ENABLED) return { ok: false, reason: 'disabled' };
   const name = knowName(q);
   // [2026-10-06, 사용자 요청] 휘발성 질문 습득 금지 — 오늘 날씨·시각류는 오늘만 유효해 지식화 가치가
   // 없다(실측 doc#33: "기상청 참고" 만능답변이 지식으로 저장). 클라이언트 즉답 경로가 담당하며, 여기선
@@ -1555,6 +1559,7 @@ app.post(`${PREFIX}/api/knowledge/acquire`, requireApiAuth, (req, res) => {
   const q = String((req.body && req.body.q) || '').trim();
   if (!q) return res.status(400).json({ error: 'q 필요' });
   const nq = normQ(q);
+  if (!KNOW_ACQUIRE_ENABLED) return res.json({ accepted: false, disabled: true });
   if (knowDismissedSet().has(nq) || knowAcquiredSet(req.user.id).has(nq)) return res.json({ accepted: true, dedup: true });
   res.json({ accepted: true, dedup: false });
   acquireKnowledge(req.user.id, q, { context: (req.body && req.body.context) || '', userName: req.user.username, source: 'auto' })
