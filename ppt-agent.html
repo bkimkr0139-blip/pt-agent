@@ -79,6 +79,15 @@ body.fs .main{height:100vh;height:100dvh}
 /* [2026-10-05] 슬라이드 줌 상태 칩 — 좌하단, 100%가 아니면 표시. 클릭=리셋 */
 #zoomChip{position:absolute;left:18px;bottom:18px;z-index:10;display:none;padding:7px 14px;border-radius:999px;border:1px solid var(--line);background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:var(--blur);color:var(--txt2);font-size:.8rem;font-weight:700;cursor:pointer}
 #zoomChip:hover{color:var(--txt);border-color:var(--line2)}
+.fPtr{position:absolute;inset:0;pointer-events:none;z-index:5;opacity:0;transition:opacity .35s}
+.fPtr.on{opacity:1}
+.fPtr .fpBox{position:absolute;border:3px solid #ffd54a;border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,.30),0 0 18px 2px rgba(255,213,74,.7);transition:left .6s ease,top .6s ease,width .6s ease,height .6s ease}
+.fPtr .fpTip{position:absolute;width:0;height:0;transition:left .6s ease,top .6s ease}
+.fPtr .fpArrow{position:absolute;left:-3px;top:-3px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.5));animation:fpBob 1.1s ease-in-out infinite}
+.fPtr .fpRing{position:absolute;left:-17px;top:-17px;width:34px;height:34px;border:3px solid #ffd54a;border-radius:50%;animation:fpPulse 1.2s ease-out infinite}
+.fPtr.noanim .fpBox,.fPtr.noanim .fpTip{transition:none}
+@keyframes fpPulse{0%{transform:scale(.5);opacity:1}100%{transform:scale(1.7);opacity:0}}
+@keyframes fpBob{0%,100%{transform:translate(0,0)}50%{transform:translate(5px,5px)}}
 .slideShapeImg,.slideShapeTitle,.slideShapeText{position:absolute}
 .slideShapeImg{object-fit:contain}
 /* [2026-10-05 핵심 수정] 폴백 모드용 .slideContent img 규칙(max-width:88%·둥근모서리·테두리·그림자)이
@@ -155,6 +164,11 @@ body.fs .main{height:100vh;height:100dvh}
 .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center;backdrop-filter:blur(8px)}
 .modal.show{display:flex}
 .modalCard{background:var(--surface);border:1px solid var(--line2);border-radius:var(--r-l);padding:28px;min-width:380px;max-width:480px;box-shadow:var(--shadow-l);animation:slideUp .3s var(--ease-spring)}
+/* [2026-10-16] 설정 화면이 길어 아래쪽 닫기 버튼이 화면 밖으로 밀리던 문제 — 카드 자체 스크롤 + 닫기 버튼 하단 고정, 설정 모달은 줄 간격 축소 */
+.modalCard{max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contain}
+.modalCard .modalClose{position:sticky;bottom:0;z-index:2;box-shadow:0 -10px 14px -6px var(--surface)}
+#settingsModal .modalCard{max-width:560px;padding-top:22px}
+#settingsModal .setRow{margin:10px 0}
 .modalCard h3{margin:0 0 20px;font-size:.95rem;font-weight:800;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
 .setRow{display:flex;align-items:center;gap:8px;margin:14px 0;flex-wrap:wrap}
 .setLbl{font-size:.78rem;color:var(--mut);min-width:72px;font-weight:700}
@@ -449,11 +463,54 @@ body.fs .main{height:100vh;height:100dvh}
     <div class="setRow"><span class="setLbl">🎙 음성 인식 엔진</span>
       <button class="setBtn on" id="sttWeb" onclick="setSttMode('web')" title="브라우저 내장 음성 인식(기본)">🌐 브라우저</button>
       <button class="setBtn" id="sttServer" onclick="setSttMode('server')" title="서버 스트리밍 인식 — 발표 용어(핫워드) 보정, 장애 시 자동 폴백">🖥️ 서버 (핫워드)</button></div>
+    <!-- [2026-10-16] 화상회의 모드 — 가상 오디오 믹서(Voicemeeter 등)로 내 마이크 + 원격 참가자 음성을 합쳐 입력으로 받는다 -->
+    <div class="setRow"><span class="setLbl">🎤 마이크 테스트</span>
+      <button class="setBtn" id="micTestBtn" onclick="meetTest(true)" title="화상회의 모드와 무관하게 현재 마이크 입력을 10초간 측정합니다">🔍 마이크 입력 테스트(10초)</button></div>
+    <div id="micTestBox" style="display:none;margin:-6px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:.74rem;color:var(--txt2)">
+      <div style="display:flex;align-items:center;gap:8px;margin:4px 0"><div style="flex:1;height:16px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:rgba(128,128,128,.15)"><div id="micLvl" style="height:100%;width:0;background:#4caf50;transition:width .06s"></div></div><span id="micLvlNum" style="min-width:150px;font-size:.72rem;color:var(--mut)"></span></div>
+      <div id="micHint" style="margin:4px 0;color:var(--mut)"></div></div>
+    <div class="setRow"><span class="setLbl">🎥 화상회의 모드</span>
+      <button class="setBtn" id="meetOn" onclick="setMeetMode(true)" title="화상회의 참가자의 질문도 받습니다 — 입력 장치 지정·서버 STT·음성 명령 자동 켬">켬</button>
+      <button class="setBtn on" id="meetOff" onclick="setMeetMode(false)">끔</button></div>
+    <div id="meetBox" style="display:none;margin:-6px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:.74rem;color:var(--txt2)">
+      <div class="setRow" style="margin:4px 0"><span class="setLbl">입력 마이크</span>
+        <select id="meetMic" onchange="meetPickMic(this.value)" style="flex:1;min-width:200px;background:transparent;color:inherit;border:1px solid var(--line);border-radius:6px;padding:4px"></select></div>
+      <div class="setRow" style="margin:4px 0"><span class="setLbl">AI 출력</span>
+        <select id="meetOut" onchange="meetPickOut(this.value)" style="flex:1;min-width:200px;background:transparent;color:inherit;border:1px solid var(--line);border-radius:6px;padding:4px"></select></div>
+      <div class="setRow" style="margin:4px 0"><button class="setBtn" onclick="meetRefreshDevices(true)">🔄 장치 새로고침</button>
+        <button class="setBtn" id="meetTestBtn" onclick="meetTest()">🔍 입력 레벨 점검(10초)</button>
+        </div>
+      <div style="display:flex;align-items:center;gap:8px;margin:4px 0"><div style="flex:1;height:16px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:rgba(128,128,128,.15)"><div id="meetLvl" style="height:100%;width:0;background:#4caf50;transition:width .06s"></div></div><span id="meetLvlNum" style="min-width:150px;font-size:.72rem;color:var(--mut)"></span></div>
+      <div id="meetHint" style="margin:4px 0;color:var(--mut)"></div>
+      <details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700">설정 가이드 (Windows + Chrome + Voicemeeter Banana)</summary>
+        <ol style="margin:6px 0 0 16px;padding:0;line-height:1.6">
+          <li>Voicemeeter Banana 설치 후 Windows 재시작.</li>
+          <li>Voicemeeter: Hardware Input 1 = 실제 마이크, 오른쪽 위 A1 = 이어폰·헤드셋.</li>
+          <li>Google Meet 설정 → 오디오: 마이크 = 실제 마이크, 스피커 = <b>Voicemeeter AUX Input</b>.</li>
+          <li>채널 버튼: 내 마이크 A1 끔·B1 켬 / Meet 음성(AUX) A1 켬·B1 켬 / 기타 PC 소리(VAIO) B1 끔.</li>
+          <li>위 <b>입력 마이크</b>에서 <b>Voicemeeter Out B1</b>(또는 Voicemeeter Output)을 선택하고 점검 버튼으로 내 말·참가자 말 모두 막대가 움직이는지 확인.</li>
+          <li><b>AI 출력</b>은 기본값(또는 실제 이어폰) — 믹서 입력(AUX/VAIO)으로 보내지 마세요. AI가 자기 답변을 다시 인식합니다.</li>
+          <li>참가자가 AI 답변을 들으려면 Meet에서 <b>이 탭을 공유 + '탭 오디오 공유'</b> 체크. Meet 마이크는 계속 실제 마이크로 유지(참가자 목소리 되돌아감 방지).</li>
+          <li>가능하면 이어폰·헤드셋 착용.</li>
+        </ol>
+        <div style="margin-top:8px;padding:8px 10px;border-left:3px solid var(--pri,#6c8cff);background:rgba(108,140,255,.08);line-height:1.6">
+          <b>💡 서버 STT 장애로 브라우저 음성 인식(Web Speech)으로 전환될 때</b><br>
+          브라우저 음성 인식은 위의 '입력 마이크' 선택을 따르지 않고 <b>Chrome/Windows 기본 입력 장치</b>를 씁니다. 그래서 믹서 출력을 기본 입력으로도 맞춰 두면 장애 시에도 참가자 음성이 계속 인식됩니다.
+          <ul style="margin:4px 0 0 16px;padding:0">
+            <li><b>Chrome 마이크 설정</b>: 주소창에 <code>chrome://settings/content/microphone</code> 입력 → 사용할 마이크를 <b>Voicemeeter Out B1</b>(또는 Voicemeeter Output)로 선택 → 이 페이지를 새로고침 후 음성 인식 다시 시작.</li>
+            <li><b>Windows 기본 입력 장치</b>: 설정 → 시스템 → 소리 → 입력에서 <b>Voicemeeter Out B1</b>(또는 Voicemeeter Output)을 선택(또는 '기본 장치로 설정').</li>
+            <li>이 경우 Meet 마이크는 <b>실제 마이크로 직접 지정</b>해 두세요(Windows 기본 입력이 믹서로 바뀌어도 상대방에게 참가자 목소리가 되돌아가지 않도록).</li>
+          </ul></div></details>
+    </div>
     <!-- [2026-10-06, 사용자 요청] 발표 하단 표시 토글 — 전체화면 발표 중 하단 캡션·컨트롤바가 시선을 빼앗는 문제.
          끔(집중 모드, 기본): 캡션 숨김 + 컨트롤바는 마우스 움직임에만 3초 표시(정지 버튼 접근 유지). -->
     <div class="setRow"><span class="setLbl">🖥️ 발표 하단 표시</span>
       <button class="setBtn" id="hudOn" onclick="setHud(true)" title="하단 캡션과 컨트롤바를 표시합니다">켬</button>
       <button class="setBtn on" id="hudOff" onclick="setHud(false)" title="캡션을 숨기고 컨트롤바는 마우스를 움직일 때만 잠깐 표시 — 발표 화면에 집중합니다">끔 (집중 모드)</button></div>
+    <!-- [2026-10-23] 포인터 안내 — 대본 문장마다 LLM이 고른 영역을 포인터+스포트라이트로 가리킴(통짜 이미지는 비전 모델 영역 인식) -->
+    <div class="setRow"><span class="setLbl">👆 포인터 안내</span>
+      <button class="setBtn" id="fzOn" onclick="setPointer(true)" title="설명하는 문장에 맞춰 포인터와 스포트라이트로 슬라이드의 해당 부분을 가리킵니다(통짜 이미지는 비전 모델이 영역을 인식)">켬</button>
+      <button class="setBtn on" id="fzOff" onclick="setPointer(false)">끔</button></div>
     <div class="setRow"><span class="setLbl">🗣️ 발표 속도</span>
       <input type="range" id="speedSlider" min="0.8" max="2" step="0.05" oninput="setTtsSpeed(this.value)" style="flex:1;accent-color:var(--pri)"/>
       <span id="speedVal" style="min-width:44px;text-align:right;font-size:.78rem;color:var(--txt2);font-weight:700"></span></div>
@@ -516,6 +573,13 @@ document.addEventListener('visibilitychange',()=>{
   }catch(e){}
 });
 try{micCmdEnabled=localStorage.getItem('ppt_agent_mic_cmd')==='1'}catch(e){}
+// [2026-10-16 사용자 지시] 화상회의 모드 — Meet 등 화상회의 참가자의 질문도 받는다. 가상 오디오 믹서(Voicemeeter 등)가 내 마이크+원격 참가자 음성을
+// 한 입력(B1/Output)으로 합쳐 주면, 그 장치를 입력으로 골라 서버 STT가 받는다(Web Speech는 장치 선택 불가 → 회의 모드에선 서버 STT 강제).
+// AI 답변은 실제 이어폰으로 내보내 믹서 입력에 되돌아가지 않게 하고, 참가자에겐 Meet '탭 공유(탭 오디오 포함)'로 들려준다.
+const MEET={on:false,micId:'',outId:'',gain:1};  // gain: 가상 믹서 입력이 작을 때(-50dB대) 서버 STT 전송 전 디지털 증폭 배율 — 점검 시 자동 산정
+try{MEET.gain=Math.max(1,Math.min(40,+localStorage.getItem('ppt_agent_meet_gain')||1))}catch(e){}
+try{MEET.on=localStorage.getItem('ppt_agent_meet')==='1';MEET.micId=localStorage.getItem('ppt_agent_meet_mic')||'';MEET.outId=localStorage.getItem('ppt_agent_meet_out')||''}catch(e){}
+if(MEET.on)micCmdEnabled=true;  // 회의 모드는 발표 중 음성 명령(질문 접수)이 전제
 let hudBottom=false;  // [2026-10-06] 발표 하단 표시(캡션·컨트롤바) — 기본 끔(집중 모드)
 try{hudBottom=localStorage.getItem('ppt_agent_hud')==='1'}catch(e){}
 let _presStarted=false;  // [2026-10-06] 발표 진행 중(재생+일시정지 포함) 표식 — 정지 후엔 컨트롤바를 계속 보여주기 위함
@@ -944,6 +1008,9 @@ window.addEventListener('pagehide',()=>{
 window.addEventListener('unhandledrejection',e=>{dbg('⚠ 미처리 거부: '+((e.reason&&e.reason.message)||e.reason))});
 window.addEventListener('error',e=>{dbg('⚠ 스크립트 오류: '+((e&&e.message)||'?')+' @'+((e&&e.lineno)||'?'))});
 const HANJA=/[一-鿿]/;
+// [2026-10-19 사용자 지시] 중국어 원천 차단 1층 — 한자·일본 가나가 TTS 입력이나 자막에 들어가면 모델이 중국어/일본어로 발음한다. 스크립트(LLM 생성)·답변·멘트 어디서든 제거한다.
+const CJK_RE=/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g;
+function stripCjk(t){return String(t==null?'':t).replace(CJK_RE,' ').replace(/\s{2,}/g,' ').trim()}
 const isHall=t=>/mbc|sbs|kbs\d?|jtbc|ytn|뉴스\s*(입니다|였습니다)|구독과\s*좋아요/i.test(t);
 // [사용자 요청] TV·생활소음·타인 속삭임에는 반응하지 않고 계속 발표 — 확실한 의사 표현("질문있습니다",
 // "잠깐 중지", "물어봐도 될까요" 등)에서만 중단. 불필요한 인터럽트로 발표 흐름이 끊기는 것을 방지.
@@ -1313,7 +1380,7 @@ function scriptToSentences(script){
     }
     return [p];
   };
-  const ss=splitSentences(script).map(p=>({t:p.t.replace(/https?:\/\/[^\s<>"']+/g,'').trim(),soft:p.soft})).filter(p=>p.t.length>3).flatMap(expand);
+  const ss=splitSentences(stripCjk(script)).map(p=>({t:p.t.replace(/https?:\/\/[^\s<>"']+/g,'').trim(),soft:p.soft})).filter(p=>p.t.length>3).flatMap(expand);
   // [2026-10-15 사용자 요청] 첫 인사("안녕하세요.")는 따로 발화하면 다음 문장 생성·700ms 휴지 때문에 텀이 길다.
   // 사전 준비 화면이 생성 시간을 벌어 주므로 인사 + 다음 문장(소개)을 한 덩어리로 합성해 이어서 자연스럽게 말한다.
   if(ss.length>1&&/^(여러분,?\s*)?안녕하(세요|십니까)(\s*여러분)?[.!]?$/.test(ss[0].t)&&(ss[0].t+' '+ss[1].t).length<=80){
@@ -1335,6 +1402,7 @@ function prefetchNextSlide(idx){
     // [2026-10-04] 첫 문장만 → 전체 문장 프리페치로 확장. 직렬 큐가 순서를 보장하므로
     // 현재 슬라이드 문장들이 먼저 등록된 뒤 자연히 이어서 처리된다 — 다음 페이지 전환 시 첫 문장부터 전부 캐시 완료.
     scriptToSentences(ns.script).forEach((p,i)=>getSlideAudio(ns,i,p.t));
+    if(POINTER_ON)planPointer(nxt,scriptToSentences(ns.script).map(p=>p.t));  // [2026-10-23] 다음 슬라이드 포인터 계획 선계산(비전 인식 포함)
   });
 }
 
@@ -1479,7 +1547,7 @@ function _native(n,counter){if(n<1||n>99)return null;if(n===20&&counter)return '
 const _UNIT_SP=/^(주|건|가구|대|회|차|배|단계|개월|기관|분기|호|위|등|세|원|달러|킬로|미터|센티|그램|리터|구|곳|명|개)/;  // 숫자 뒤 단위가 붙어 다른 말로 읽히는 것(4주→사주) 방지 — 단위 앞 한 칸
 const _NATIVE_UNIT='명|개|가지|곳|마리|장|권|잔|살|번|시간|달|병|그루|켤레';
 function ttsNormalize(text){
-  let t=String(text==null?'':text);
+  let t=stripCjk(text==null?'':text);  // [2026-10-19] 한자·가나 제거(중국어 발음 방지 1층)
   const _endsComma=/[,，]\s*$/.test(t);
   // 1) 서식·기호·이모지
   t=t.replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu,' ').replace(/[*#`>|_]+/g,' ').replace(/ /g,' ');
@@ -1581,6 +1649,9 @@ try{
     console.warn('TTS(local) 실패:',r.status);dbg('TTS[local] HTTP'+r.status+' '+(Date.now()-_t0)+'ms');
     // [2026-10-06, 사용자 요청] 429/5xx 일시 오류 1회 재시도 — 프록시 업스트림 순단 실측(당일 502 20회,
     // 그 다음 요청은 1.2s 내 성공). 큐 폐기·타임아웃으로 중단된 요청은 재시도하지 않는다(폐기 의지 존중).
+    // [2026-10-19] 언어 이탈 차단(프록시 502 tts-lang-drift) — 프록시가 시드 교체 재시도·분할까지 마친 결과라 재요청은 무의미(또 35~48초). 문장은 자막으로 대체하고 건너뛴다.
+    if(r.status===502){let _j=null;try{_j=await r.clone().json()}catch(e){}
+      if(_j&&_j.error==='tts-lang-drift'){dbg('🚫 한국어가 아닌 발화 감지 → 음성 차단(자막으로 대체): '+String(_j.why||'').slice(0,40));qaLog('tts_lang_blocked',{why:String(_j.why||'').slice(0,60),chars:String(text).length});return null}}
     if(r.status>=429&&!(signal&&signal.aborted)){
       await new Promise(res=>setTimeout(res,1200));
       if(signal&&signal.aborted)return null;
@@ -1613,7 +1684,7 @@ let _duckLevel=0,_duckTimer=null;
 let _actx=null;
 function _ensureActx(){
   try{
-    if(!_actx){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;_actx=new AC();_actx.onstatechange=()=>{if(_actx.state!=='running'&&_actx.state!=='closed')_actx.resume().catch(()=>{})}}
+    if(!_actx){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;_actx=new AC();if(MEET.outId&&_actx.setSinkId)_actx.setSinkId(MEET.outId).catch(e=>dbg('⚠ 출력 장치 지정 실패: '+((e&&e.message)||e)));_actx.onstatechange=()=>{if(_actx.state!=='running'&&_actx.state!=='closed')_actx.resume().catch(()=>{})}}
     if(_actx.state!=='running')_actx.resume().catch(()=>{});
     return _actx.state==='running'?_actx:null;
   }catch(e){return null}
@@ -1752,6 +1823,7 @@ function stripEchoPrefix(t){
 }
 
 let _sttLastEvt=Date.now();  // 감시자용 마지막 STT 이벤트 시각
+let _wsDead=0;  // [2026-10-16] Web Speech가 이벤트 한 건 없이 감시자에 연속 걸린 횟수 — 3회면 서버 STT로 자동 전환
 function startListening(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return;stopListening();recognizer=new SR();recognizer.lang='ko-KR';recognizer.continuous=true;recognizer.interimResults=true;
 // [2026-09-29] 느린/바쁜 PC에서 STT가 가끔 죽는 문제 — 원인 두 가지:
 // 1) onerror 핸들러가 없어서 'audio-capture'/'network' 등 onend가 안 따라올 수 있는
@@ -1759,7 +1831,7 @@ function startListening(){const SR=window.SpeechRecognition||window.webkitSpeech
 // 2) onend에서 바로 recognizer.start()를 부르면, 이전 인스턴스 정리가 덜 끝난 상태에서
 //    겹쳐 "already started" 예외가 나고 catch가 조용히 삼켜서 그대로 죽어버림 — 바쁜 PC일수록 잦음.
 recognizer.onerror=(e)=>{
-  _sttLastEvt=Date.now();
+  _sttLastEvt=Date.now();_wsDead=0;
   console.warn('STT 오류:',e.error);
   if(e.error==='not-allowed'||e.error==='service-not-allowed')dbg('⚠ STT 권한 오류('+e.error+') — 마이크 권한 확인 필요');
   // [2026-10-05] 'aborted' 추가 — 다른 start()와 충돌로 중단된 뒤 재기동이 안 걸리면 그대로 죽는다
@@ -1768,7 +1840,7 @@ recognizer.onerror=(e)=>{
   }
 };
 recognizer.onresult=e=>{
-  _sttLastEvt=Date.now();  // interim 포함 어떤 결과든 인식기 살아있음의 증거
+  _sttLastEvt=Date.now();_wsDead=0;  // interim 포함 어떤 결과든 인식기 살아있음의 증거
   for(let i=e.resultIndex;i<e.results.length;i++){
     const r=e.results[i];
     // [2026-10-06 사용자 지정] 볼륨 더킹 — interim이 사용자 발화 시작의 가장 빠른 신호. 재생 중
@@ -2111,7 +2183,7 @@ recognizer.onresult=e=>{
       if(_bgTalkTimes.length>=BG_TALK_THRESHOLD){_bgTalkTimes=[];pauseForBackgroundTalk()}
     }
   }
-};recognizer.onend=()=>{_sttLastEvt=Date.now();if(sttActive){setTimeout(()=>{if(sttActive)try{recognizer.start()}catch(e){console.warn('STT 재시작 실패:',e.message)}},250)}};try{if(ServerStt.wanted()){sttActive=true;ServerStt.start().catch(er=>{console.warn('서버 STT 시작 실패:',er);if(typeof dbg==='function')dbg('⚠ 서버 STT 시작 실패('+(er&&er.message||er)+')');ServerStt.st.fallback=true;qaLog('stt_fallback_web',{why:String(er&&er.message||er).slice(0,60)});if(sttActive)startListening()})}else{recognizer.start();sttActive=true}}catch(e){console.warn('STT 시작 실패:',e.message)}}
+};recognizer.onend=()=>{_sttLastEvt=Date.now();_wsDead=0;if(sttActive){setTimeout(()=>{if(sttActive)try{recognizer.start()}catch(e){console.warn('STT 재시작 실패:',e.message)}},250)}};try{if(ServerStt.wanted()){sttActive=true;ServerStt.start().catch(er=>{console.warn('서버 STT 시작 실패:',er);if(typeof dbg==='function')dbg('⚠ 서버 STT 시작 실패('+(er&&er.message||er)+')');ServerStt.st.fallback=true;qaLog('stt_fallback_web',{why:String(er&&er.message||er).slice(0,60)});if(sttActive)startListening()})}else{recognizer.start();sttActive=true}}catch(e){console.warn('STT 시작 실패:',e.message)}}
 /*SERVERSTT-BEGIN*/
 // ── 서버 Streaming STT 클라이언트 [2026-10-14 고도화 Phase 3] ─────────────────────────────────
 // 마이크(에코 제거·잡음 억제 켬) → 16kHz PCM16 100ms 청크 → /api/stt/chunk. 서버 VAD·Qwen3-ASR가 speech_start/partial/final을 돌려주면
@@ -2120,11 +2192,20 @@ recognizer.onresult=e=>{
 const ServerStt=(()=>{
   let ctx=null,node=null,stream=null,sid=null,gen=0,active=false,q=[],sending=false,fails=0,reconnects=0,acc=new Float32Array(0),srcRate=16000,startedAt=0;
   const st={fallback:false,lastErr:'',chunks:0,events:0};
+  // [2026-10-16] 입력 레벨 진단 — 서버가 청크 응답에 구간 최대 RMS(int16)를 실어 준다. 10초마다 로그, 20초 동안 한 번도 발화 임계(≈220, 회의 모드)에
+  // 못 미치면 "입력이 너무 작거나 없음"을 1회 경고한다(가상 믹서 B1 버튼·게인·장치 선택 점검 유도).
+  let lvlMax=0,lvlAt=0,lvlWarned=false,lvlAll=0;
+  function lvlTrack(v){
+    v=+v||0;if(v>lvlMax)lvlMax=v;if(v>lvlAll)lvlAll=v;
+    if(Date.now()-lvlAt>=10000){dbg('🎚 입력 레벨 최근 10초 peak='+lvlMax+(lvlMax<220?' (낮음)':''));lvlAt=Date.now();const m=lvlMax;lvlMax=0;
+      if(!lvlWarned&&lvlAll<220&&st.chunks>150){lvlWarned=true;qaLog('stt_input_silent',{peak:lvlAll,meet:MEET.on});setStatus('⚠ 마이크 입력 신호가 거의 없습니다 — Voicemeeter B1 버튼·입력 마이크 선택을 확인하세요');dbg('⚠ 입력 신호 거의 없음(peak '+lvlAll+') — 믹서 B1 버튼/게인/장치 선택 점검')}}
+  }
   const OUT_SAMPLES=1600;  // 100ms @16k — 이벤트 수신 지연(응답 폴링 간격)을 줄인다
   const WORKLET=`class P extends AudioWorkletProcessor{process(i){const c=i[0]&&i[0][0];if(c)this.port.postMessage(new Float32Array(c));return true}}registerProcessor('pcm-cap',P)`;
-  function wanted(){let m='web';try{m=localStorage.getItem('ppt_agent_stt_mode')||'web'}catch(e){}return m==='server'&&!st.fallback&&!!(navigator.mediaDevices&&window.AudioContext)}
+  function wanted(){let m='web';try{m=localStorage.getItem('ppt_agent_stt_mode')||'web'}catch(e){}return (m==='server'||MEET.on)&&!st.fallback&&!!(navigator.mediaDevices&&window.AudioContext)}  // [2026-10-16] 화상회의 모드는 입력 장치 지정이 필요해 서버 STT 강제
   function toPcm(f32){const o=new Int16Array(f32.length);for(let i=0;i<f32.length;i++){const v=Math.max(-1,Math.min(1,f32[i]));o[i]=v<0?v*32768:v*32767}return o}
   function push(f32){
+    if(MEET.on&&MEET.gain>1){const g=MEET.gain,o=new Float32Array(f32.length);for(let i=0;i<f32.length;i++){const v=f32[i]*g;o[i]=v>1?1:v<-1?-1:v}f32=o}  // [2026-10-16] 믹서 입력이 작을 때 디지털 증폭
     // 연속 수집 → 16k 선형 보간 다운샘플 → 200ms 블록
     const merged=new Float32Array(acc.length+f32.length);merged.set(acc);merged.set(f32,acc.length);acc=merged;
     const ratio=srcRate/16000,need=Math.ceil(OUT_SAMPLES*ratio);
@@ -2145,6 +2226,7 @@ const ServerStt=(()=>{
         if(r.status===404){throw new Error('session-gone')}
         if(!r.ok)throw new Error('http '+r.status);
         const j=await r.json();fails=0;st.chunks++;_sttLastEvt=Date.now();  // 감시자(12초 무이벤트)용 생존 신호
+        lvlTrack(j.lvl);
         for(const e of (j.events||[]))dispatch(e);
       }
     }catch(e){
@@ -2176,11 +2258,17 @@ const ServerStt=(()=>{
     if(was)startListening();   // wanted()가 이제 false → Web Speech
   }
   async function start(){
-    stop();active=true;const my=++gen;q=[];acc=new Float32Array(0);fails=0;
-    stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    stop();active=true;const my=++gen;q=[];acc=new Float32Array(0);fails=0;_sttLastEvt=Date.now();lvlMax=0;lvlAt=Date.now();lvlWarned=false;
+    // [2026-10-16] 화상회의 모드 — 가상 믹서 장치 지정. 믹서 출력은 이미 깨끗하고 AI 답변이 섞이지 않으므로 에코 제거·잡음 억제를 끄고(원격 참가자의
+    // 작은 목소리를 깎지 않게) 자동 이득만 켠다. 지정 장치가 사라졌으면(OverconstrainedError) 기본 장치로 폴백.
+    {const base=MEET.on?{channelCount:1,echoCancellation:false,noiseSuppression:false,autoGainControl:true}:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true};
+     const withDev=(MEET.on&&MEET.micId)?Object.assign({deviceId:{exact:MEET.micId}},base):base;
+     try{stream=await navigator.mediaDevices.getUserMedia({audio:withDev})}
+     catch(e){if(withDev!==base&&/Overconstrained|NotFound/.test(String(e&&e.name))){dbg('⚠ 지정한 입력 장치를 찾지 못해 기본 마이크로 진행');stream=await navigator.mediaDevices.getUserMedia({audio:base})}else throw e}
+     try{const tr=stream.getAudioTracks()[0];dbg('🎙 입력 장치: '+(tr&&tr.label||'?')+(MEET.on?' [화상회의 모드]':''))}catch(e){}}
     if(my!==gen){stream.getTracks().forEach(t=>t.stop());return}
     let hot=[];try{hot=sttHotwords()}catch(e){}
-    const r=await fetch('/ppt-agent/api/stt/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hotwords:hot})});
+    const r=await fetch('/ppt-agent/api/stt/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hotwords:hot,meet:MEET.on})});
     if(!r.ok)throw new Error('start http '+r.status);
     const j=await r.json();sid=j.sid;
     try{ctx=new AudioContext({sampleRate:16000})}catch(e){ctx=new AudioContext()}
@@ -2220,15 +2308,132 @@ function sttHotwords(){
 }
 function setSttMode(m){try{localStorage.setItem('ppt_agent_stt_mode',m)}catch(e){}ServerStt.st.fallback=false;document.getElementById('sttWeb').classList.toggle('on',m!=='server');document.getElementById('sttServer').classList.toggle('on',m==='server');if(sttActive){stopListening();startListening()}}
 
+// ── 화상회의 모드 [2026-10-16] ──
+const MEET_VIRTUAL_RE=/voicemeeter|vb-audio|cable|virtual|blackhole|loopback|mixer/i;
+function meetSyncUi(){
+  document.getElementById('meetOn').classList.toggle('on',MEET.on);document.getElementById('meetOff').classList.toggle('on',!MEET.on);
+  document.getElementById('meetBox').style.display=MEET.on?'block':'none';
+  if(MEET.on){document.getElementById('sttWeb').classList.remove('on');document.getElementById('sttServer').classList.add('on')}  // 회의 모드는 서버 STT 강제 — 표시도 맞춘다
+  else{let m='web';try{m=localStorage.getItem('ppt_agent_stt_mode')==='server'?'server':'web'}catch(e){}document.getElementById('sttWeb').classList.toggle('on',m==='web');document.getElementById('sttServer').classList.toggle('on',m==='server')}
+  try{document.title=(MEET.on?'🎥 ':'')+document.title.replace(/^🎥\s*/,'')}catch(e){}
+  if(MEET.on)meetRefreshDevices(false);
+}
+function setMeetMode(v){
+  MEET.on=!!v;try{localStorage.setItem('ppt_agent_meet',MEET.on?'1':'0')}catch(e){}
+  if(MEET.on)setMicCmd(true);
+  meetSyncUi();
+  ServerStt.st.fallback=false;
+  if(sttActive){stopListening();startListening()}  // 발표 중 전환 즉시 반영
+  qaLog('meet_mode',{on:MEET.on});dbg('🎥 화상회의 모드 '+(MEET.on?'켬':'끔'));
+}
+async function meetRefreshDevices(ask){
+  const selM=document.getElementById('meetMic'),selO=document.getElementById('meetOut');
+  try{
+    if(ask){const t=await navigator.mediaDevices.getUserMedia({audio:true});t.getTracks().forEach(x=>x.stop())}  // 장치 이름(label)은 권한 허용 뒤에만 보인다
+    const ds=await navigator.mediaDevices.enumerateDevices();
+    const ins=ds.filter(d=>d.kind==='audioinput'),outs=ds.filter(d=>d.kind==='audiooutput');
+    const opt=(d,i,k)=>'<option value="'+d.deviceId+'">'+((d.label||(k+' '+(i+1))).replace(/[<>&]/g,''))+'</option>';
+    selM.innerHTML='<option value="">(시스템 기본 마이크)</option>'+ins.map((d,i)=>opt(d,i,'마이크')).join('');
+    selO.innerHTML='<option value="">(시스템 기본 출력)</option>'+outs.map((d,i)=>opt(d,i,'출력')).join('');
+    selM.value=ins.some(d=>d.deviceId===MEET.micId)?MEET.micId:'';
+    selO.value=outs.some(d=>d.deviceId===MEET.outId)?MEET.outId:'';
+    // 자동 추천 — 가상 믹서 출력(Voicemeeter Out B1/Output)이 보이고 아직 지정 전이면 안내
+    if(!MEET.micId){const vm=ins.find(d=>MEET_VIRTUAL_RE.test(d.label||'')&&!/aux|vaio/i.test(d.label||''));if(vm)document.getElementById('meetHint').textContent='💡 가상 믹서 입력 "'+vm.label+'"이(가) 감지됐습니다 — 입력 마이크에서 선택하세요.'}
+    meetHint();
+  }catch(e){document.getElementById('meetHint').textContent='⚠ 마이크 권한이 필요합니다: '+((e&&e.message)||e)}
+}
+function meetHint(){
+  const el=document.getElementById('meetHint'),sel=document.getElementById('meetMic');
+  const lbl=sel&&sel.selectedOptions[0]?sel.selectedOptions[0].textContent:'';
+  if(!MEET.micId)el.textContent='⚠ 시스템 기본 마이크 사용 중 — 원격 참가자 음성을 받으려면 가상 믹서 출력(Voicemeeter Out B1)을 선택하세요. (Chrome 마이크 설정·Windows 기본 입력 장치 안내는 아래 가이드 참고)';
+  else if(!MEET_VIRTUAL_RE.test(lbl))el.textContent='⚠ "'+lbl+'"은(는) 가상 믹서 장치로 보이지 않습니다 — 내 목소리만 인식될 수 있습니다.';
+  else el.textContent='✅ 입력: '+lbl+' — 점검 버튼으로 내 말·참가자 말이 모두 잡히는지 확인하세요.';
+}
+function meetPickMic(id){MEET.micId=id||'';try{localStorage.setItem('ppt_agent_meet_mic',MEET.micId)}catch(e){};meetHint();if(sttActive){stopListening();startListening()}}
+function meetPickOut(id){
+  MEET.outId=id||'';try{localStorage.setItem('ppt_agent_meet_out',MEET.outId)}catch(e){}
+  try{if(_actx&&_actx.setSinkId)_actx.setSinkId(MEET.outId||'').catch(e=>dbg('⚠ 출력 장치 지정 실패: '+((e&&e.message)||e)))}catch(e){}
+  if(MEET.outId&&/aux|vaio|voicemeeter\s*(input|out)|cable\s*input/i.test(document.getElementById('meetOut').selectedOptions[0].textContent))document.getElementById('meetHint').textContent='⚠ AI 출력이 믹서 입력으로 보입니다 — AI가 자기 답변을 다시 인식할 수 있어요. 실제 이어폰/기본 출력을 권장합니다.';
+}
+let _meetTesting=false;
+// 한 번의 레벨 측정 — constraints로 마이크를 열어 secs초 동안 RMS/peak를 잰다. 반환 {peak,heard,label,muted,state,rate,err}
+async function _meetMeasure(constraints,secs,onTick){
+  let stream=null,ctx=null;const out={peak:0,heard:0,label:'?',muted:false,state:'?',rate:0,readyState:'?',err:''};
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:constraints});
+    const tr=stream.getAudioTracks()[0];out.label=(tr&&tr.label)||'?';out.readyState=tr?tr.readyState:'?';
+    let _muted=!!(tr&&tr.muted);if(tr){tr.onmute=()=>{_muted=true};tr.onunmute=()=>{_muted=false}}
+    ctx=new (window.AudioContext||window.webkitAudioContext)();
+    try{await ctx.resume()}catch(e){}
+    out.state=ctx.state;out.rate=ctx.sampleRate;
+    const an=ctx.createAnalyser();an.fftSize=2048;
+    const src=ctx.createMediaStreamSource(stream),mute=ctx.createGain();mute.gain.value=0;
+    src.connect(an);an.connect(mute);mute.connect(ctx.destination);   // 분석기를 출력까지 이어 그래프가 항상 구동되게(무음 게인)
+    const buf=new Float32Array(an.fftSize),t0=Date.now();
+    await new Promise(res=>{const iv=setInterval(()=>{
+      an.getFloatTimeDomainData(buf);let m=0,sum=0;for(let i=0;i<buf.length;i++){const v=Math.abs(buf[i]);if(v>m)m=v;sum+=buf[i]*buf[i]}
+      const rms=Math.sqrt(sum/buf.length);out.peak=Math.max(out.peak,m);if(rms>0.01)out.heard++;
+      if(onTick)onTick(rms,out.peak,Math.max(0,secs-Math.round((Date.now()-t0)/1000)));
+      if(Date.now()-t0>secs*1000){clearInterval(iv);res()}},60)});
+    out.muted=_muted;
+  }catch(e){out.err=((e&&e.name)||'')+' '+((e&&e.message)||e)}
+  finally{try{if(stream)stream.getTracks().forEach(t=>t.stop())}catch(e){}try{if(ctx)ctx.close()}catch(e){}}
+  return out;
+}
+async function meetTest(plain){
+  if(_meetTesting)return;_meetTesting=true;
+  // plain=true: 설정의 일반 마이크 테스트 — 화상회의 모드 꺼짐에서도 동작, 증폭 배율·장치 지정은 건드리지 않는다
+  const P=plain===true,btn=document.getElementById(P?'micTestBtn':'meetTestBtn'),bar=document.getElementById(P?'micLvl':'meetLvl'),hint=document.getElementById(P?'micHint':'meetHint'),num=document.getElementById(P?'micLvlNum':'meetLvlNum');
+  if(P)document.getElementById('micTestBox').style.display='block';
+  btn.disabled=true;hint.textContent='⏳ 마이크를 여는 중…';num.textContent='';bar.style.width='0';
+  // dB 눈금(-70dB~0dB → 0~100%) — 가상 믹서 입력은 -40~-50dB로 아주 작은 경우가 많아 선형 눈금에선 막대가 안 보였다
+  const dbOf=v=>v>1e-5?20*Math.log10(v):-100;
+  const tick=(rms,peak,left)=>{const d=dbOf(rms),pct=Math.max(0,Math.min(100,Math.round((d+70)/70*100)));bar.style.width=pct+'%';bar.style.background=d>-12?'#e5484d':d>-45?'#4caf50':'#e0a030';num.textContent='현재 '+(d<=-100?'-∞':Math.round(d))+' dB · 최대 '+(peak>1e-5?Math.round(dbOf(peak)):'-∞')+' dB · '+left+'초'};
+  try{
+    hint.textContent=P?'🎤 지금 말해 보세요 (10초)':'🎤 지금 말해 보세요 — 그다음 원격 참가자에게도 말해 달라고 하세요 (10초)';
+    const c=P?{channelCount:1}:Object.assign({channelCount:1,echoCancellation:false,noiseSuppression:false,autoGainControl:true},MEET.micId?{deviceId:{exact:MEET.micId}}:{});
+    const r=await _meetMeasure(c,10,tick);
+    const info=' [장치: '+r.label+' · 트랙 '+r.readyState+(r.muted?' · ⚠음소거됨':'')+' · 오디오 '+r.state+' '+r.rate+'Hz]';
+    if(r.err){hint.textContent='⚠ 점검 실패: '+r.err;return}
+    const pk=Math.round(dbOf(r.peak));
+    // 약한 신호 — 완전 무음이 아니면 자동 보정: 목표 최대치 ≈ 0.35(-9dB)가 되도록 디지털 증폭 배율 산정(최대 ×40)
+    if(P&&r.peak>=0.0015){hint.textContent=(r.peak<0.2?'✅ 입력은 되지만 작은 편입니다':'✅ 입력 정상')+'(최대 '+pk+' dB, 소리 감지 '+r.heard+'회). 막대가 말에 따라 움직였다면 정상입니다.'+info;qaLog('mic_test',{peak:+r.peak.toFixed(4),mic:r.label});return}
+    if(r.peak>=0.0015&&r.peak<0.2){
+      const g=Math.max(1,Math.min(40,0.35/r.peak));MEET.gain=+g.toFixed(1);try{localStorage.setItem('ppt_agent_meet_gain',String(MEET.gain))}catch(e){}
+      hint.textContent='✅ 신호는 들어오지만 작습니다(최대 '+pk+' dB). 서버 음성 인식 입력에 ×'+MEET.gain+' 증폭을 자동 적용했습니다. 더 크게 하려면 Voicemeeter의 Stereo Input 1 Fader Gain을 올리거나 Windows 마이크 입력 볼륨을 높이세요(올린 뒤 다시 점검하면 배율이 재산정됩니다).'+info;
+      qaLog('meet_test',{peak:+r.peak.toFixed(4),gain:MEET.gain,mic:r.label});return;
+    }
+    if(r.peak>=0.2){MEET.gain=1;try{localStorage.setItem('ppt_agent_meet_gain','1')}catch(e){}
+      hint.textContent='✅ 입력 신호 정상(최대 '+pk+' dB, 소리 감지 '+r.heard+'회). 내 말과 참가자 말 모두에서 막대가 움직였다면 정상입니다.'+info;qaLog('meet_test',{peak:+r.peak.toFixed(3),heard:r.heard,mic:r.label});return}
+    // 사실상 무신호 — 제약 조건 탓인지 가르기 위해 기본 제약으로 4초 재시험
+    hint.textContent='🔎 신호가 없어 기본 설정으로 재시험 중… 계속 말해 주세요 (4초)'+info;
+    const r2=await _meetMeasure(true,4,tick);
+    qaLog('meet_test',{peak:+r.peak.toFixed(5),peak2:+r2.peak.toFixed(5),muted:r.muted,state:r.state,mic:r.label,mic2:r2.label});
+    let why;
+    if(r2.err)why='기본 설정 재시험도 실패: '+r2.err;
+    else if(r2.peak>=0.0015)why='✅ 기본 설정에서는 입력이 잡힙니다(최대 '+Math.round(dbOf(r2.peak))+' dB, 장치: '+r2.label+') — 지정한 장치/제약이 문제입니다. 입력 마이크를 "(시스템 기본 마이크)"로 두거나 다른 장치를 고르세요.';
+    else if(r.muted||r2.muted)why='⚠ 마이크 트랙이 음소거 상태입니다 — Windows 설정 > 개인 정보 및 보안 > 마이크(앱 접근 허용)와 키보드/하드웨어 음소거, 다른 앱의 독점 사용을 확인하세요.';
+    else why='⚠ 신호가 사실상 없습니다(최대 '+pk+' dB, 장치: '+r2.label+'). Voicemeeter 채널의 B1 버튼·입력 장치(마이크 배열)·Fader Gain, Windows 입력 볼륨/입력 테스트 막대를 확인하세요.';
+    hint.textContent=why+info;
+  }catch(e){hint.textContent='⚠ 점검 실패: '+((e&&e.name)||'')+' '+((e&&e.message)||e)}
+  finally{bar.style.width='0';btn.disabled=false;_meetTesting=false}
+}
 function stopListening(){sttActive=false;try{ServerStt.stop()}catch(e){}if(recognizer){try{recognizer.stop()}catch(e){}recognizer=null}}
 // [2026-10-05] STT 침묵 감시자 — Chrome 연속 인식이 onend/onerror 없이 조용히 죽는 경우가 있고
 // 그 동안 사용자가 "질문있다"를 말해도 아무 일도 안 일어난다(실측: 발표 재개 후 재질문 무반응).
 // 12초간 어떤 이벤트도 없으면 인식기를 새로 기동해 스스로 회복한다.
 setInterval(()=>{
   if(!sttActive||!recognizer)return;
+  if(ServerStt.wanted())return;  // [2026-10-16] 서버 STT는 자체 재연결·폴백(recover)이 있다 — Web Speech 전용 감시자가 서버 STT 기동 중에 반복 재시작시켜 스트림을 죽이던 문제(화상회의 모드 실측: 시작 직후 12초 무이벤트 오판)
   if(Date.now()-_sttLastEvt<12000)return;
   _sttLastEvt=Date.now();
-  dbg('⚠ STT 감시 — 12초 무이벤트, 인식기 강제 재기동');
+  // [2026-10-16] 브라우저 음성 인식이 이벤트(결과·오류·종료) 한 건도 없이 3번 연속 걸리면 마이크를 못 듣는 상태 — Chrome 마이크 설정이 믹서(B1) 등 신호 없는 장치로 남은 경우
+  // (실측: Windows 기본 장치를 되돌렸는데도 Web Speech 무반응으로 질문이 전혀 접수되지 않고 발표가 진행됨). 서버 STT(기본 마이크 직접 캡처)로 자동 전환한다.
+  if(++_wsDead>=3&&playing&&!ServerStt.st.fallback){
+    _wsDead=0;dbg('🔁 브라우저 음성 인식 무반응 — 서버 STT로 자동 전환');qaLog('stt_auto_server',{why:'web_speech_dead'});
+    setSttMode('server');setStatus('🔁 브라우저 음성 인식이 마이크를 못 들어 서버 음성 인식으로 전환했습니다');return;
+  }
+  dbg('⚠ STT 감시 — 12초 무이벤트, 인식기 강제 재기동 ('+_wsDead+'/3)');
   startListening();
 },3000);
 
@@ -3108,7 +3313,10 @@ async function handleInterruption(q,fromClosing){
   // [2026-10-13] 호명+트리거 보존 — "OpenAI에게 질문 있습니다"는 정리하면 호명 "OpenAI에게"만 남아
   // (4자 이상이라 통과) 실질문으로 오인돼 엉뚱한 답을 했다. 원문이 질문 예고(ask)였고 정리 후 남은 게
   // 호명 조각(…에게/한테/께/님/씨)뿐이면 정리하지 않고 원문을 유지해 아래 ask 분기("질문해 주세요")로 보낸다.
-  const _askOnly=detectIntent(q)==='ask'&&_cq&&/^[A-Za-z0-9가-힣.\s]{1,30}(에게|한테|께|님|씨|야|아)[,.!\s]*$/.test(_cq);
+  // [2026-10-15] 호출어 잔여 — "잠깐만요 질문 있습니다"는 정리하면 "잠깐만요"(4자 이상)만 남아 질문 본문으로 오인돼 엉뚱한 답을 했다(실측 [9l0j][6jmx]).
+  // 질문 예고(ask)이고 정리 후 남은 게 부름·추임새(잠깐만요·저기요·죄송한데요·실례합니다·혹시…)뿐이면 질문 본문이 아니다.
+  const _callOnly=detectIntent(q)==='ask'&&_cq&&String(_cq).replace(/(잠깐만요?|잠시만요?|잠깐|잠시|저기요?|여기요|죄송한데요?|죄송합니다|실례합니다|실례지만|혹시|그러면|그럼|근데|아니|저|제가|하나|한\s*가지|좀|요)/g,'').replace(/[\s.,!?]/g,'').length<4;
+  const _askOnly=detectIntent(q)==='ask'&&_cq&&(_callOnly||/^[A-Za-z0-9가-힣.\s]{1,30}(에게|한테|께|님|씨|야|아)[,.!\s]*$/.test(_cq));
   if(_askOnly)dbg('🙋 호명+질문 예고 — 질문 본문 아님, 대기 진입: "'+q.slice(0,24)+'"');
   else if(_cq&&_cq!==q){dbg('🧹 질문 정리: "'+_cq.slice(0,30)+'"');q=_cq}
   _answeringQKey=String(q).replace(/\s/g,'');_answeringQAt=Date.now();  // [2026-10-07 v10] 재접수 폐기 기준 갱신(정리 본문 키)
@@ -3623,7 +3831,7 @@ async function playSentenceStream(idx){
   }
   // 세대 체크 — presentSlide가 다시 호출됐으면 이 체인은 폐기
   if(gen!==_playGen){console.log('stale chain aborted, slide',curSlideIdx);return}
-  if(url){noteSpoken(sentences[idx]);if(_sp){startPrepStage(3);setTimeout(startPrepEnd,250)}const _pp=playAudio(url);_curSentAudio={el:audioEl,idx,gen:_playGen};await _pp}  // [2026-10-14] 재개 위치 판정용 — 이 문장을 재생하는 Audio 요소 보관(pause 후에도 currentTime 유지)
+  if(url){try{pointOnSentence(curSlideIdx,idx)}catch(e){}noteSpoken(sentences[idx]);if(_sp){startPrepStage(3);setTimeout(startPrepEnd,250)}const _pp=playAudio(url);_curSentAudio={el:audioEl,idx,gen:_playGen};await _pp}  // [2026-10-14] 재개 위치 판정용 — 이 문장을 재생하는 Audio 요소 보관(pause 후에도 currentTime 유지)
   else if(curSlideIdx===slides.length-1&&idx>=sentences.length-1){dbg('⚠ 마지막 문장 음성 실패 — 필수 멘트 경로로 재생');await speakUnified(sentences[idx],true)}  // [2026-10-15] 발표 마지막 문장은 누락 금지(이후 청중 질문이 이어진다)
   else{setStatus('⚠ 문장 '+(idx+1)+' 음성 생성 실패 — 자막으로 확인해 주세요');qaLog('sentence_tts_fail',{idx:idx+1,chars:(sentences[idx]||'').length});dbg('⚠ 문장 '+(idx+1)+' 음성 실패 — 스킵(브라우저 음성 금지)')}  // [2026-10-05] 정책 확장(사용자 지정): 브라우저 폴백 음성 원천 금지 — 이국 억양·중국계 발음이 어디서도 나오지 않게. 자막에 원문이 있으므로 스킵하고 다음 문장으로
   if(interrupted)return;
@@ -3680,6 +3888,7 @@ const _parts=scriptToSentences(s.script);
 sentences=_parts.map(p=>p.t);
 sentenceGaps=_parts.map(p=>p.soft?200:700);  // 쉼표 조각 사이 200ms(자연스러운 호흡) / 문장 끝 700ms
 curSentenceIdx=0;
+if(POINTER_ON){hidePointer();planPointer(idx,sentences)}  // [2026-10-23] 비동기 — 재생을 지연시키지 않는다
 // [2026-10-01] 이미지가 크거나 많은 PPT("Flattened"류 — 슬라이드 1장이 고해상도 이미지 1장)에서
 // 백그라운드 이미지 로딩이 내레이션 속도를 못 따라가면, 이 슬라이드가 아직 로딩 중인 채로
 // renderSlide가 먼저 불려 빈 화면으로 보이고, 이미 다음 슬라이드로 넘어간 뒤에야 로딩이 끝나
@@ -3759,6 +3968,7 @@ function renderSlide(idx){
       const clampLo=sh.type==='title'?14:10,clampHi=sh.type==='title'?64:32;
       return `<div class="${sh.type==='title'?'slideShapeTitle':'slideShapeText'}" style="${pos}font-size:clamp(${clampLo}px,${fs}cqh,${clampHi}px)">${esc(sh.text)}</div>`;
     }).join('');
+    s._view={ox:_ox,oy:_oy,rx:_rx,ry:_ry};
     const [_w,_h]=_fitCanvasSize(el,_rx,_ry);
     el.innerHTML=`<div class="slideCanvas" style="width:${_w}px;height:${_h}px;aspect-ratio:${_rx}/${_ry}">${body}</div>`;
     dbg('슬라이드 '+(idx+1)+' 렌더 '+sz.w+'x'+sz.h+' 도형'+s.shapes.length+(_crop?' 크롭('+Math.round(_cw/sz.w*100)+'%x'+Math.round(_ch/sz.h*100)+'%)':' 전체')+' → 캔버스 '+Math.floor(_w)+'x'+Math.floor(_h)+' 중앙정렬 [박스 '+s.shapes.slice(0,3).map(sh=>sh.box?Math.round(sh.box.x/sz.w*100)+','+Math.round(sh.box.y/sz.h*100)+' '+Math.round(sh.box.w/sz.w*100)+'x'+Math.round(sh.box.h/sz.h*100)+'%':'?').join(' / ')+']');
@@ -3930,7 +4140,7 @@ function setVoice(v,silent){
   }
 }
 function setMicCmd(v){
-  micCmdEnabled=!!v;
+  micCmdEnabled=!!v||MEET.on;  // 화상회의 모드에선 항상 켬
   try{localStorage.setItem('ppt_agent_mic_cmd',micCmdEnabled?'1':'0')}catch(e){}
   document.getElementById('micCmdOn').classList.toggle('on',micCmdEnabled);
   document.getElementById('micCmdOff').classList.toggle('on',!micCmdEnabled);
@@ -3947,6 +4157,8 @@ function setMicCmd(v){
   }catch(e){}
   try{setMicCmd(micCmdEnabled)}catch(e){}
   try{const m=localStorage.getItem('ppt_agent_stt_mode')==='server'?'server':'web';document.getElementById('sttWeb').classList.toggle('on',m==='web');document.getElementById('sttServer').classList.toggle('on',m==='server')}catch(e){}
+  try{meetSyncUi()}catch(e){}  // [2026-10-16] 화상회의 모드 복원
+  try{setPointer(POINTER_ON,true)}catch(e){}  // [2026-10-23] 포인터 안내 설정 복원
   try{setHud(hudBottom,true)}catch(e){}  // [2026-10-06] 하단 표시 설정 복원(silent — 부팅 시 컨트롤바 표시 안 함)
   // [2026-10-04] qaBox 클릭 = 수동 "계속" — 발표가 어떤 이유로 멈춰도 클릭 한 번으로 재개
   const qb=document.getElementById('qaBox');
@@ -4108,7 +4320,12 @@ async function finishPresentation(){
   }
 }
 document.getElementById('btnPlay').onclick=()=>playing?pausePresentation():startPresentation();
-document.getElementById('btnStop').onclick=()=>{stopAll();exitFS()};
+// [2026-10-22] 정지 버튼 강화 — 종료 Q&A 타이머·마무리 토큰·질문 상태까지 정리하고, 어느 단계가 예외를 던져도 나머지(전체화면 해제 포함)는 반드시 실행
+function hardStop(){
+  const steps=[stopAll,hidePointer,()=>{clearTimeout(_closingTimer);_finishTok++;_finishing=false;qaState='idle'},()=>{try{speechSynthesis.cancel()}catch(e){}if(audioEl){audioEl.pause();audioEl=null}ttsSpeaking=false},()=>{playing=false;interrupted=false;document.getElementById('btnPlay').textContent='▶'},()=>setStatus('⏹ 정지'),exitFS];
+  for(const f of steps){try{f()}catch(e){try{dbg('⚠ 정지 단계 오류: '+((e&&e.message)||e))}catch(_){}}}
+}
+document.getElementById('btnStop').onclick=hardStop;
 // ── 슬라이드 넘기기 — 발표 중에도 건너뛰기 가능 ──
 function goToSlide(idx){
   if(idx<0||idx>=slides.length)return;
@@ -4286,6 +4503,122 @@ function applySlideZoom(){
   const chip=document.getElementById('zoomChip');
   if(chip){chip.textContent=Math.round(_sZoom*100)+'%';chip.style.display=_sZoom!==1?'block':'none'}
   requestAnimationFrame(()=>{syncAnnoCanvas()});
+}
+// ── [2026-10-23] 포인터 안내 ──
+// 설명하는 문장에 맞춰 슬라이드의 해당 영역에 "포인터 + 스포트라이트(나머지는 살짝 어둡게)"를 옮긴다.
+// 대상 영역: ① 텍스트 도형 = 도형 좌표 ② 이미지 도형 = 비전 모델(서버 /api/vision/regions, qwen2.5vl)이 찾은
+// 영역(통짜 이미지 슬라이드 대응). 어느 문장이 어느 영역인지는 LLM이 번호로 고른다(좌표는 지어내지 않음).
+// 계획은 재생과 병렬 + 다음 슬라이드 프리페치 시점에 미리 만들어, 늦으면 뒤 문장부터 적용된다.
+let POINTER_ON=false;try{POINTER_ON=localStorage.getItem('ppt_agent_pointer')==='1'}catch(e){}
+function setPointer(v,silent){
+  POINTER_ON=!!v;try{localStorage.setItem('ppt_agent_pointer',POINTER_ON?'1':'0')}catch(e){}
+  const a=document.getElementById('fzOn'),b=document.getElementById('fzOff');
+  if(a)a.classList.toggle('on',POINTER_ON);if(b)b.classList.toggle('on',!POINTER_ON);
+  if(!POINTER_ON)hidePointer();
+  else if(!silent&&playing&&slides[curSlideIdx]&&sentences.length)planPointer(curSlideIdx,sentences);
+}
+function _slideView(s){   // renderSlide과 같은 콘텐츠 크롭 계산 — 도형 좌표 → 캔버스 비율
+  const sz=s.slideSize;let bx=sz.w,by=sz.h,br=0,bb=0,has=false;
+  s.shapes.forEach(sh=>{if(!sh.box)return;has=true;const b=sh.box;bx=Math.min(bx,b.x);by=Math.min(by,b.y);br=Math.max(br,b.x+b.w);bb=Math.max(bb,b.y+b.h)});
+  const pad=Math.min(sz.w,sz.h)*0.04;bx=Math.max(0,bx-pad);by=Math.max(0,by-pad);br=Math.min(sz.w,br+pad);bb=Math.min(sz.h,bb+pad);
+  const cw=has?Math.max(1,br-bx):sz.w,ch=has?Math.max(1,bb-by):sz.h;
+  const crop=has&&(cw<sz.w*0.92||ch<sz.h*0.92);
+  return crop?{ox:bx,oy:by,rx:cw,ry:ch}:{ox:0,oy:0,rx:sz.w,ry:sz.h};
+}
+function ensurePointer(){
+  const cv=_sCanvasEl();if(!cv)return null;
+  let el=cv.querySelector('.fPtr');
+  if(!el){
+    el=document.createElement('div');el.className='fPtr';
+    el.innerHTML='<div class="fpBox"></div><div class="fpTip"><div class="fpRing"></div><svg class="fpArrow" width="30" height="36" viewBox="0 0 30 36"><path d="M3 3 L3 28 L10 22 L15 33 L20 31 L15 20 L25 20 Z" fill="#ffd54a" stroke="#222" stroke-width="2" stroke-linejoin="round"/></svg></div>';
+    cv.appendChild(el);el._fresh=true;
+  }
+  return el;
+}
+function hidePointer(){const cv=_sCanvasEl();const el=cv&&cv.querySelector('.fPtr');if(el)el.classList.remove('on')}
+// 이미지 도형을 비전 모델 입력용으로 축소 — 28의 배수 + 약 0.86MP로 보내면 모델의 bbox가 실제 픽셀 좌표로 돌아온다(실측)
+async function _visionImage(src){
+  const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('이미지 로드 실패'));i.src=src});
+  const nw=img.naturalWidth,nh=img.naturalHeight,a=nw/nh;
+  const H=Math.max(28,Math.round(Math.sqrt(860000/a)/28)*28),W=Math.max(28,Math.round(H*a/28)*28);
+  const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,W,H);g.drawImage(img,0,0,W,H);
+  return {image:c.toDataURL('image/jpeg',0.85),w:W,h:H,nw,nh};
+}
+async function _imageRegions(sh){
+  if(sh._regions)return sh._regions;
+  if(sh._regionsP)return sh._regionsP;
+  sh._regionsP=(async()=>{
+    try{
+      const v=await _visionImage(sh.src);
+      const r=await fetch('/ppt-agent/api/vision/regions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:v.image,w:v.w,h:v.h})});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json();sh._nat={w:v.nw,h:v.nh};sh._regions=j.regions||[];
+      dbg('👁 이미지 영역 '+sh._regions.length+'개 인식'+(j.cached?'(캐시)':''));
+    }catch(e){dbg('👁 영역 인식 실패(전체 이미지로 대체): '+((e&&e.message)||e));sh._regions=[]}
+    return sh._regions;
+  })();
+  return sh._regionsP;
+}
+async function planPointer(idx,sents){
+  const s=slides[idx];if(!s||!s.shapes||!s.slideSize||!sents||!sents.length)return;
+  if(s._imagesReady){try{await s._imagesReady}catch(e){}}   // 이미지 디코딩 완료 후(src 확보)
+  if(!s.shapes.every(sh=>sh.box))return;   // 폴백 레이아웃 슬라이드는 좌표 없음
+  const key=sents.join('|');
+  if(s._ptPlan&&s._ptPlan.key===key)return;
+  const plan=s._ptPlan={key,targets:[],map:null};
+  try{
+    const v=_slideView(s);const targets=[];
+    for(const sh of s.shapes){
+      const b=sh.box;
+      if(sh.type==='image'){
+        if(!sh.src)continue;
+        const regs=await _imageRegions(sh);
+        // 이미지 내용 영역(object-fit:contain 여백 반영)
+        let cx=b.x,cy=b.y,cw=b.w,ch=b.h;
+        if(sh._nat){const ia=sh._nat.w/sh._nat.h,ba=b.w/b.h;if(ba>ia){cw=b.h*ia;cx=b.x+(b.w-cw)/2}else{ch=b.w/ia;cy=b.y+(b.h-ch)/2}}
+        if(regs.length){regs.forEach(r=>{const[x1,y1,x2,y2]=r.bbox;
+          targets.push({label:r.label||'(그림 영역)',fx:(cx+x1*cw-v.ox)/v.rx,fy:(cy+y1*ch-v.oy)/v.ry,fw:(x2-x1)*cw/v.rx,fh:(y2-y1)*ch/v.ry})});
+        }else if(!(b.w>=s.slideSize.w*0.85&&b.h>=s.slideSize.h*0.85)){
+          targets.push({label:'(그림)',fx:(b.x-v.ox)/v.rx,fy:(b.y-v.oy)/v.ry,fw:b.w/v.rx,fh:b.h/v.ry});
+        }
+      }else if(sh.type!=='title'&&(sh.text||'').trim()){
+        targets.push({label:(sh.text||'').replace(/\s+/g,' ').slice(0,70),fx:(b.x-v.ox)/v.rx,fy:(b.y-v.oy)/v.ry,fw:b.w/v.rx,fh:b.h/v.ry});
+      }
+    }
+    if(!targets.length){plan.map=[];return}
+    plan.targets=targets;
+    const list=targets.map((t,n)=>(n+1)+'. '+t.label+' — 가로 '+Math.round((t.fx+t.fw/2)*100)+'%, 세로 '+Math.round((t.fy+t.fh/2)*100)+'%').join('\n');
+    const sl=sents.map((t,i)=>(i+1)+'. '+t).join('\n');
+    const prompt=`슬라이드에서 설명 대상이 될 영역 목록과 발표 문장이 있습니다. 각 문장을 말하는 동안 포인터로 가리킬 영역 번호를 고르세요.
+- 문장이 특정 영역의 내용을 직접 설명할 때만 그 번호를, 전체 소개·전환·마무리 문장이면 0을 고르세요.
+- 발표는 보통 위→아래, 왼쪽→오른쪽 순서로 진행됩니다. 목록에 없는 번호는 쓰지 마세요.
+[영역 목록]
+${list}
+[발표 문장]
+${sl}
+[출력] JSON 배열만 출력하세요. 문장 수(${sents.length})와 같은 길이의 정수 배열. 예: [0,2,2,3,0]`;
+    const r=await fetch(LOCAL_LLM,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:prompt}]})});
+    const j=await r.json().catch(()=>({}));const t=(j.message&&j.message.content||j.content||'');
+    const m=/\[[\s\d,]*\]/.exec(t);if(!m)throw new Error('JSON 없음');
+    const arr=JSON.parse(m[0]);
+    plan.map=sents.map((_,k)=>{const n=+arr[k]||0;return n>=1&&n<=targets.length?n-1:-1});
+    dbg('👆 포인터 계획(슬라이드 '+(idx+1)+'): '+plan.map.map(x=>x<0?'–':x+1).join(' '));
+  }catch(e){dbg('👆 포인터 계획 실패(무시): '+((e&&e.message)||e));plan.map=[]}
+}
+function pointOnSentence(slideIdx,sentIdx){
+  if(!POINTER_ON||slideIdx!==_visualSlideIdx)return;
+  const s=slides[slideIdx];if(!s||!s._ptPlan||!s._ptPlan.map)return;
+  if(s._ptPlan.key!==sentences.join('|'))return;
+  const ti=s._ptPlan.map[sentIdx],t=ti>=0?s._ptPlan.targets[ti]:null;
+  const el=ensurePointer();if(!el)return;
+  if(!t){el.classList.remove('on');return}
+  const cl=v=>Math.max(0,Math.min(1,v));
+  const x=cl(t.fx),y=cl(t.fy),w=Math.min(1-x,Math.max(0.04,t.fw)),h=Math.min(1-y,Math.max(0.04,t.fh));
+  const box=el.firstChild,tip=el.lastChild,P=v=>(v*100).toFixed(2)+'%';
+  const place=()=>{box.style.left=P(x);box.style.top=P(y);box.style.width=P(w);box.style.height=P(h);
+    tip.style.left=P(Math.min(0.97,x+w*0.5));tip.style.top=P(Math.min(0.95,y+h*0.5))};
+  if(el._fresh){el.classList.add('noanim');place();el.offsetWidth;el.classList.remove('noanim');el._fresh=false}else place();
+  requestAnimationFrame(()=>el.classList.add('on'));
 }
 function resetSlideZoom(){_sZoom=1;_sPanX=0;_sPanY=0;applySlideZoom()}
 {

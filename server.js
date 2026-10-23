@@ -1180,6 +1180,59 @@ async function proxyToN8n(req, res, webhookPath, eventType) {
   }
 }
 app.post(`${PREFIX}/api/script`, requireApiAuth, (req, res) => (req.user.role === 'admin' || Number(req.user.allow_openai == null ? 1 : req.user.allow_openai)) ? proxyToN8n(req, res, 'koen-openai-script', 'script_call') : res.status(403).json({ error: 'OpenAI 미허용 계정' }));
+// [2026-10-23] 슬라이드 이미지 영역 인식 — 통짜 이미지 슬라이드에서 "설명 대상 영역"(텍스트 블록·표·차트·그림)의
+// 위치를 비전 모델(Ollama qwen2.5vl)로 찾는다. 대본과 무관(이미지당 1회) → 이미지 해시로 디스크 캐시.
+// 메모리 압박 방지: keep_alive=0(분석 직후 언로드), 요청은 직렬 처리.
+const VISION_MODEL = process.env.VISION_MODEL || 'qwen2.5vl:7b';
+const VISION_DIR = path.join(__dirname, 'data', 'vision-cache');
+let _visionChain = Promise.resolve();
+async function visionRegions(b64, w, h) {
+  const body = {
+    model: VISION_MODEL, stream: false, keep_alive: 0, options: { temperature: 0, num_ctx: 4096 },
+    messages: [{ role: 'user', images: [b64], content:
+      '이 슬라이드 이미지를 발표자가 설명할 "의미 단위 영역"으로 나누세요. 한 줄씩 쪼개지 말고, 같은 주제의 글줄 묶음(불릿 목록 전체)은 하나의 영역으로 합치세요.\n' +
+      '영역 종류: 제목, 불릿/문단 묶음, 표 전체, 차트·그래프 전체(막대·축·범례 포함), 다이어그램, 사진·그림. 영역 수는 3~10개.\n' +
+      '각 영역의 위치를 이미지 픽셀 좌표로 출력하세요. JSON 배열만 출력: [{"bbox_2d":[x1,y1,x2,y2],"label":"영역 내용을 한국어 10자 안팎으로 요약"}]' }],
+  };
+  const r = await fetch('http://127.0.0.1:11434/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(180000) });
+  if (!r.ok) throw new Error('ollama ' + r.status);
+  const j = await r.json();
+  const t = (j.message && j.message.content) || '';
+  const m = /\[[\s\S]*\]/.exec(t);
+  if (!m) throw new Error('JSON 없음: ' + t.slice(0, 80));
+  const arr = JSON.parse(m[0]);
+  const out = [];
+  for (const it of arr) {
+    const bb = it && (it.bbox_2d || it.bbox);
+    if (!Array.isArray(bb) || bb.length !== 4) continue;
+    let [x1, y1, x2, y2] = bb.map(Number);
+    if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
+    // 모델이 0~1000 정규화로 답하는 경우 대비 — 이미지 크기를 크게 넘지 않으면 픽셀로 간주
+    const nx1 = Math.min(x1, x2) / w, nx2 = Math.max(x1, x2) / w, ny1 = Math.min(y1, y2) / h, ny2 = Math.max(y1, y2) / h;
+    const c = v => Math.max(0, Math.min(1, v));
+    const box = [c(nx1), c(ny1), c(nx2), c(ny2)];
+    if (box[2] - box[0] < 0.02 || box[3] - box[1] < 0.015) continue;
+    out.push({ label: String(it.label || '').slice(0, 40), bbox: box.map(v => +v.toFixed(4)) });
+  }
+  return out.slice(0, 16);
+}
+app.post(`${PREFIX}/api/vision/regions`, requireApiAuth, async (req, res) => {
+  try {
+    const { image, w, h } = req.body || {};
+    const m = /^data:image\/(?:jpeg|png);base64,(.+)$/.exec(image || '');
+    if (!m || !(w > 50) || !(h > 50)) return res.status(400).json({ error: 'image(dataURL)·w·h 필요' });
+    const key = require('crypto').createHash('sha1').update(m[1]).digest('hex');
+    const cf = path.join(VISION_DIR, key + '.json');
+    try { return res.json({ regions: JSON.parse(fs.readFileSync(cf, 'utf8')), cached: true }); } catch (_) {}
+    const run = _visionChain.then(() => visionRegions(m[1], w, h));
+    _visionChain = run.catch(() => {});
+    const regions = await run;
+    try { fs.mkdirSync(VISION_DIR, { recursive: true }); fs.writeFileSync(cf, JSON.stringify(regions)); } catch (_) {}
+    res.json({ regions, cached: false });
+  } catch (e) {
+    res.status(502).json({ error: String((e && e.message) || e).slice(0, 200) });
+  }
+});
 app.post(`${PREFIX}/api/llm`, requireApiAuth, (req, res) => proxyToN8n(req, res, 'koen-local-llm', 'llm_call'));
 
 // ── 개인화 RAG — 임베딩은 서버만 n8n을 호출(클라이언트가 부를 수 있는 /api/embed 라우트 자체를
@@ -1365,7 +1418,7 @@ function serverHotwords(userId) {
 app.post(`${PREFIX}/api/stt/start`, requireApiAuth, (req, res) => {
   const client = Array.isArray(req.body && req.body.hotwords) ? req.body.hotwords.slice(0, 200).map(x => String(x).slice(0, 40)) : [];
   const sess = sttStream.createSession({
-    user: req.user.username, hotwords: [...client, ...serverHotwords(req.user.id)], asrUrl: TTS_ASR_URL,
+    user: req.user.username, hotwords: [...client, ...serverHotwords(req.user.id)], asrUrl: TTS_ASR_URL, meet: !!(req.body && req.body.meet),
     log: (line) => { if (line && line[0] === '{') { try { fs.appendFileSync(STT_LOG, line + '\n'); } catch (_) {} } else console.log(`[STT-STREAM] ${line}`); },
   });
   res.json({ sid: sess.sid, hotwords: sess.hw.length, sampleRate: sttStream.SR });
@@ -1374,7 +1427,9 @@ app.post(`${PREFIX}/api/stt/chunk`, requireApiAuth, express.raw({ type: 'applica
   const sess = sttStream.getSession(String(req.query.sid || ''));
   if (!sess || sess.user !== req.user.username) return res.status(404).json({ error: 'session-gone' });
   const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-  res.json({ events: sttStream.feed(sess, body), speaking: sess.speaking });
+  const events = sttStream.feed(sess, body);
+  const lvl = Math.round(sess.peak || 0); sess.peak = 0;   // [2026-10-16] 구간 최대 RMS(int16) — 클라이언트 입력 레벨 진단용
+  res.json({ events, speaking: sess.speaking, lvl });
 });
 app.post(`${PREFIX}/api/stt/stop`, requireApiAuth, (req, res) => {
   const sess = sttStream.getSession(String(req.query.sid || ''));
