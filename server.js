@@ -1183,16 +1183,48 @@ app.post(`${PREFIX}/api/script`, requireApiAuth, (req, res) => (req.user.role ==
 // [2026-10-23] 슬라이드 이미지 영역 인식 — 통짜 이미지 슬라이드에서 "설명 대상 영역"(텍스트 블록·표·차트·그림)의
 // 위치를 비전 모델(Ollama qwen2.5vl)로 찾는다. 대본과 무관(이미지당 1회) → 이미지 해시로 디스크 캐시.
 // 메모리 압박 방지: keep_alive=0(분석 직후 언로드), 요청은 직렬 처리.
-const VISION_MODEL = process.env.VISION_MODEL || 'qwen2.5vl:7b';
+// [2026-11-13] 기본을 7b→32b로: 7b는 글줄 박스의 x2를 크게 줄여 잡고(제목 0.14↔실제 0.32) 문장 한 줄을 통째로 빠뜨림(슬라이드 2 실측). 32b는 좌표가 정확(≈46s/장, 1회·디스크 캐시).
+const VISION_MODEL = process.env.VISION_MODEL || 'qwen2.5vl:32b';
+const VISION_VER = 'v2-' + String(VISION_MODEL).replace(/[^a-z0-9]+/gi, '');  // 프롬프트/모델이 바뀌면 캐시 무효화
 const VISION_DIR = path.join(__dirname, 'data', 'vision-cache');
 let _visionChain = Promise.resolve();
+// [2026-11-13] 세로로 쌓인 좁은 조각(카드의 숫자·제목·설명, 열 안의 연월·건수)은 하나의 영역으로 합친다.
+// 비전 모델이 카드 하나를 3조각으로 쪼개면 포인터가 카드 안에서 맴돌고 문장↔영역 대응이 어긋난다. 넓은 글줄(불릿)은 합치지 않는다.
+function mergeStackedRegions(regs) {
+  const R = regs.map(r => ({ label: r.label, b: r.bbox.slice() }));
+  const near = (a, c) => {
+    const wa = a.b[2] - a.b[0], wc = c.b[2] - c.b[0];
+    if (wa >= 0.22 || wc >= 0.22) return false;
+    const ov = Math.min(a.b[2], c.b[2]) - Math.max(a.b[0], c.b[0]);
+    const aligned = ov / Math.max(0.001, Math.min(wa, wc)) > 0.6 || Math.abs((a.b[0] + a.b[2]) / 2 - (c.b[0] + c.b[2]) / 2) < 0.035;
+    const gap = Math.max(a.b[1], c.b[1]) - Math.min(a.b[3], c.b[3]);
+    const hh = Math.max(a.b[3], c.b[3]) - Math.min(a.b[1], c.b[1]);
+    return aligned && gap <= 0.07 && hh <= 0.42;
+  };
+  for (let again = true; again;) {
+    again = false;
+    for (let i = 0; i < R.length && !again; i++) for (let j = i + 1; j < R.length && !again; j++) {
+      if (!near(R[i], R[j])) continue;
+      const a = R[i], c = R[j];
+      const first = a.b[1] <= c.b[1] ? a : c, second = first === a ? c : a;
+      R[i] = { label: (first.label + ' ' + second.label).slice(0, 60), b: [Math.min(a.b[0], c.b[0]), Math.min(a.b[1], c.b[1]), Math.max(a.b[2], c.b[2]), Math.max(a.b[3], c.b[3])] };
+      R.splice(j, 1); again = true;
+    }
+  }
+  // 읽는 순서: 위→아래(같은 줄은 왼→오른쪽)
+  R.sort((p, q) => (Math.abs(p.b[1] - q.b[1]) < 0.03 ? p.b[0] - q.b[0] : p.b[1] - q.b[1]));
+  return R.map(r => ({ label: r.label, bbox: r.b.map(v => +v.toFixed(4)) }));
+}
 async function visionRegions(b64, w, h) {
   const body = {
     model: VISION_MODEL, stream: false, keep_alive: 0, options: { temperature: 0, num_ctx: 4096 },
     messages: [{ role: 'user', images: [b64], content:
-      '이 슬라이드 이미지를 발표자가 설명할 "의미 단위 영역"으로 나누세요. 한 줄씩 쪼개지 말고, 같은 주제의 글줄 묶음(불릿 목록 전체)은 하나의 영역으로 합치세요.\n' +
-      '영역 종류: 제목, 불릿/문단 묶음, 표 전체, 차트·그래프 전체(막대·축·범례 포함), 다이어그램, 사진·그림. 영역 수는 3~10개.\n' +
-      '각 영역의 위치를 이미지 픽셀 좌표로 출력하세요. JSON 배열만 출력: [{"bbox_2d":[x1,y1,x2,y2],"label":"영역 내용을 한국어 10자 안팎으로 요약"}]' }],
+      '이 슬라이드 이미지에서 발표자가 차례로 가리키며 설명할 영역을 찾으세요.\n' +
+      '- 제목, 소제목, 문장 한 줄/한 단락, 불릿 항목 하나하나는 각각 별도 영역입니다(불릿이 4줄 이상이면 의미 묶음 단위).\n' +
+      '- 숫자 카드·KPI 박스·표의 칸·차트의 막대/구성요소처럼 나란히 놓인 항목은 하나하나를 별도 영역으로 잡으세요. 예: 숫자 카드가 4개면 영역 4개.\n' +
+      '- label은 영역 안에 실제로 적힌 핵심 글자(숫자·단위 포함)를 10~30자 이내로 그대로 옮겨 적으세요. 글자 없는 그림만 내용을 설명하세요. "불릿", "표 전체", "문단" 같은 일반 명칭은 쓰지 마세요.\n' +
+      '- 영역 수 4~20개, 위→아래·왼쪽→오른쪽 순서로 나열.\n' +
+      'JSON 배열만 출력: [{"bbox_2d":[x1,y1,x2,y2],"label":"..."}]' }],
   };
   const r = await fetch('http://127.0.0.1:11434/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(180000) });
   if (!r.ok) throw new Error('ollama ' + r.status);
@@ -1214,7 +1246,7 @@ async function visionRegions(b64, w, h) {
     if (box[2] - box[0] < 0.02 || box[3] - box[1] < 0.015) continue;
     out.push({ label: String(it.label || '').slice(0, 40), bbox: box.map(v => +v.toFixed(4)) });
   }
-  return out.slice(0, 16);
+  return mergeStackedRegions(out).slice(0, 20);
 }
 app.post(`${PREFIX}/api/vision/regions`, requireApiAuth, async (req, res) => {
   try {
@@ -1222,12 +1254,16 @@ app.post(`${PREFIX}/api/vision/regions`, requireApiAuth, async (req, res) => {
     const m = /^data:image\/(?:jpeg|png);base64,(.+)$/.exec(image || '');
     if (!m || !(w > 50) || !(h > 50)) return res.status(400).json({ error: 'image(dataURL)·w·h 필요' });
     const key = require('crypto').createHash('sha1').update(m[1]).digest('hex');
-    const cf = path.join(VISION_DIR, key + '.json');
-    try { return res.json({ regions: JSON.parse(fs.readFileSync(cf, 'utf8')), cached: true }); } catch (_) {}
+    const cf = path.join(VISION_DIR, VISION_VER + '-' + key + '.json');
+    // [2026-11-13] 원본 이미지 해시(srcKey) 캐시 — 브라우저·PC마다 축소 JPEG 바이트가 달라(캔버스 인코더 차이)
+    // 같은 슬라이드도 캐시를 놓치고 비전 모델(수십 초)을 다시 돌려 포인터가 크게 늦던 문제. 좌표는 0~1 정규화라 재사용 가능.
+    const sk = /^[0-9a-f]{40}$/.test(String(req.body.srcKey || '')) ? String(req.body.srcKey) : null;
+    const sf = sk ? path.join(VISION_DIR, VISION_VER + '-src-' + sk + '-' + (w | 0) + 'x' + (h | 0) + '.json') : null;
+    for (const f of [sf, cf]) { if (!f) continue; try { return res.json({ regions: JSON.parse(fs.readFileSync(f, 'utf8')), cached: true }); } catch (_) {} }
     const run = _visionChain.then(() => visionRegions(m[1], w, h));
     _visionChain = run.catch(() => {});
     const regions = await run;
-    try { fs.mkdirSync(VISION_DIR, { recursive: true }); fs.writeFileSync(cf, JSON.stringify(regions)); } catch (_) {}
+    try { fs.mkdirSync(VISION_DIR, { recursive: true }); fs.writeFileSync(cf, JSON.stringify(regions)); if (sf) fs.writeFileSync(sf, JSON.stringify(regions)); } catch (_) {}
     res.json({ regions, cached: false });
   } catch (e) {
     res.status(502).json({ error: String((e && e.message) || e).slice(0, 200) });
