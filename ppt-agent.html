@@ -95,6 +95,7 @@ body.fs .main{height:100vh;height:100dvh}
 @keyframes fpBob{0%,100%{transform:translate(0,0)}50%{transform:translate(5px,5px)}}
 .slideShapeImg,.slideShapeTitle,.slideShapeText{position:absolute}
 .slideShapeImg{object-fit:contain}
+.slideVideo{position:absolute;object-fit:contain;background:#000;z-index:3}
 /* [2026-10-05 핵심 수정] 폴백 모드용 .slideContent img 규칙(max-width:88%·둥근모서리·테두리·그림자)이
 캔버스 모드 슬라이드 이미지에 새어 들어가 이미지가 캔버스의 88%만 채웠다 — 우측에 정확히 12% 여백과
 둥근 모서리가 생기던 근원(면밀 추적 끝에 확인). 캔버스 모드에선 항상 캔버스 전체를 채운다. */
@@ -403,6 +404,7 @@ body.fs .main{height:100vh;height:100dvh}
       <button class="ctrBtn" id="btnNext">⏭</button>
       <button class="ctrBtn" id="btnStop">⏹</button>
       <button class="ctrBtn" id="btnFit" title="슬라이드 화면 채움 방식 전환">🖼 맞춤</button>
+      <button class="ctrBtn" id="btnVideo" title="현재 슬라이드에 동영상(mp4) 연결" onclick="attachVideoPick()">🎞 영상</button><input type="file" id="videoInput" accept=".mp4,.m4v,.mov,.webm,video/mp4,video/webm,video/quicktime" hidden onchange="attachVideoFile(this.files[0]);this.value=''">
       <div class="prog"><div class="progBar" id="progBar" style="width:0%"></div></div>
       <div class="sldNum" id="sldNum">– / –</div>
       <div class="status" id="status"><span id="statusMsg">대기 중</span> · <b id="verBadge" title="진단 로그는 원격 수집됩니다 (화면 콘솔은 ?dbg=1)">v9</b></div>
@@ -594,7 +596,12 @@ let ttsSpeed=(()=>{try{const s=parseFloat(localStorage.getItem('ppt_agent_speed'
 // 배속(피치 보존). OpenAI 음성은 서버가 이미 속도를 반영하므로 이중 배속 방지를 위해 제외.
 const _localUrls=new Set();
 function _localUrl(u){_localUrls.add(u);if(_localUrls.size>200)_localUrls.delete(_localUrls.values().next().value);return u}
-function applyPlaybackRate(){if(!audioEl)return;const loc=_localUrls.has(audioEl.src)||_localUrls.has(audioEl._srcUrl);audioEl.preservesPitch=true;audioEl.webkitPreservesPitch=true;audioEl.playbackRate=loc?ttsSpeed:1}
+// [2026-11-13] OpenAI 음성 말속도 보정 — 서버가 잰 말속도(X-TTS-Rate, 한글 글자/초)를 기준 5.1자/초로 맞추는 배속 계수.
+// gpt-4o-mini-tts는 같은 설정에서도 요청마다 4.4~5.7자/초로 요동쳐 발표 중 빨라졌다 느려졌다 했다. 음높이 보존(preservesPitch)이라 톤은 그대로.
+const _urlAdj=new Map(),TTS_REF_RATE=5.1;
+function _rateAdj(hdr){const rt=parseFloat(hdr);if(!(rt>2&&rt<9))return 1;const a=Math.max(0.9,Math.min(1.1,TTS_REF_RATE/rt));return Math.abs(a-1)<0.02?1:a}
+function _setAdj(u,a){if(a!==1){_urlAdj.set(u,a);if(_urlAdj.size>300)_urlAdj.delete(_urlAdj.keys().next().value)}return u}
+function applyPlaybackRate(){if(!audioEl)return;const loc=_localUrls.has(audioEl.src)||_localUrls.has(audioEl._srcUrl);audioEl.preservesPitch=true;audioEl.webkitPreservesPitch=true;const adj=_urlAdj.get(audioEl._srcUrl)||_urlAdj.get(audioEl.src)||1;audioEl.playbackRate=(loc?ttsSpeed:1)*adj}
 function setTtsSpeed(v){ttsSpeed=+v;if(typeof applyPlaybackRate==='function')applyPlaybackRate();document.getElementById('speedVal').textContent=ttsSpeed.toFixed(2)+'x';try{localStorage.setItem('ppt_agent_speed',ttsSpeed)}catch(e){}updateSpeedTotalTime()}
 // [2026-09-29] 발표 속도 슬라이더 옆에 예상 총 발표 시간 표시 — 슬라이드별 실제 스크립트가
 // 아직 생성 전이면(LLM 호출 전) note/bullets/title로 대체 추정(ponytail: 정확한 산출 아님,
@@ -859,7 +866,101 @@ function slidesFromJsonSafe(sl){
     if(!sh.b64)return{...sh,src:null,blob:null};
     const blob=base64ToBlob(sh.b64,sh.mime);
     return{type:'image',box:sh.box,blob,src:URL.createObjectURL(blob)};
-  })}));
+  }),video:s.videoUrl?{url:s.videoUrl,mime:s.videoMime||'video/mp4'}:undefined}));
+}
+// ── 슬라이드 동영상 [2026-11-13] — 마지막 장표가 동영상이면: 앞 슬라이드 발표 → 영상 상영 → 영상 종료로 마무리(끝인사·Q&A 없음) ──
+// 'play' = 재생 가능한 영상 보유 / 'missing' = 마지막 장표가 글 없는 이미지뿐이고 앞 슬라이드가 "동영상"을 안내했는데 영상 파일이 없음(예전에 저장된 덱 등)
+function slideVideoKind(idx){
+  const s=slides[idx];if(!s)return null;
+  if(s.video&&s.video.url&&!String(s.note||'').trim()&&!String(s.script||'').trim())return 'play';  // 낭독할 노트가 있는 영상 슬라이드는 일반 슬라이드로(영상은 컨트롤로 수동 재생)
+  if(s.video&&s.video.url)return null;
+  if(idx===slides.length-1&&idx>0&&!s.title&&!(s.bullets&&s.bullets.length)&&!s.note&&!s.script&&!(s.shapes||[]).some(sh=>sh.type!=='image')){
+    const p=slides[idx-1];if(p&&/동영상|영상/.test((p.note||'')+' '+(p.script||'')))return 'missing';
+  }
+  return null;
+}
+let _vidDone=null;
+function _vidAbort(){const f=_vidDone;_vidDone=null;try{const s=slides[curSlideIdx];if(s&&s._vidEl)s._vidEl.pause()}catch(e){}if(f)f('abort')}
+function _ensureVideoEl(s){
+  if(s._vidEl)return s._vidEl;
+  const v=document.createElement('video');v.className='slideVideo';v.src=s.video.url;v.playsInline=true;v.controls=true;v.preload='auto';
+  const im=(s.shapes||[]).find(sh=>sh.type==='image'&&sh.src);if(im)v.poster=im.src;
+  s._vidEl=v;return v;
+}
+function _videoPos(s,v,_ox,_oy,_rx,_ry){
+  const sz=s.slideSize;let b=(s.video&&s.video.box)||null;
+  if(!b){const imgs=(s.shapes||[]).filter(sh=>sh.type==='image'&&sh.box).sort((a,c)=>c.box.w*c.box.h-a.box.w*a.box.h);b=imgs[0]?imgs[0].box:null}
+  if(!b||(sz&&b.w>=sz.w*0.9&&b.h>=sz.h*0.85))b=sz?{x:0,y:0,w:sz.w,h:sz.h}:{x:0,y:0,w:_rx,h:_ry};
+  v.style.cssText=`left:${((b.x-_ox)/_rx*100).toFixed(3)}%;top:${((b.y-_oy)/_ry*100).toFixed(3)}%;width:${(b.w/_rx*100).toFixed(3)}%;height:${(b.h/_ry*100).toFixed(3)}%`;
+}
+function playSlideVideo(idx){
+  return new Promise(res=>{
+    const s=slides[idx],v=_ensureVideoEl(s);
+    let last=-1,still=0,wd=null;
+    const done=why=>{clearInterval(wd);v.removeEventListener('ended',onEnd);v.removeEventListener('error',onErr);if(_vidDone===done)_vidDone=null;res(why)};
+    const onEnd=()=>done('ended'),onErr=()=>{dbg('⚠ 영상 재생 오류 code='+((v.error&&v.error.code)||'?')+' '+((v.error&&v.error.message)||''));done('error')};
+    v.addEventListener('ended',onEnd);v.addEventListener('error',onErr);
+    _vidDone=done;
+    // 재생이 20초 넘게 한 프레임도 안 나가면(디코딩 실패·네트워크 정지) 발표가 영영 멈추지 않도록 종료 처리
+    wd=setInterval(()=>{if(v.paused||v.ended){still=0;return}const t=v.currentTime;if(t===last){if(++still>=5){dbg('⚠ 영상 재생 정지 감지(20s) — 종료 처리');done('stall')}}else{still=0;last=t}},4000);
+    if(v.ended)v.currentTime=0;
+    v.muted=false;
+    v.play().catch(()=>{dbg('⚠ 소리 있는 자동재생 차단 — 음소거로 재생(영상 컨트롤에서 소리 켜기)');v.muted=true;v.play().catch(()=>done('blocked'))});
+  });
+}
+async function presentVideoSlide(idx,gen,kind){
+  const s=slides[idx];
+  sentences=[];sentenceGaps=[];curSentenceIdx=0;
+  try{hidePointer()}catch(e){}
+  if(s._imagesReady)await s._imagesReady;
+  if(gen!==_playGen)return;
+  renderSlide(idx);
+  setStatus('🎞 슬라이드 '+(idx+1)+'/'+slides.length+' — '+(kind==='play'?'영상 상영':'영상 장표'));
+  await new Promise(r=>setTimeout(r,800));
+  if(gen!==_playGen||!playing)return;
+  if(kind==='play'){
+    dbg('🎞 슬라이드 '+(idx+1)+' 영상 상영 시작 — 끝나면 발표 종료');
+    stopListening();  // 영상 소리가 청중 발화로 인식돼 발표가 끊기지 않게 마이크를 끈다
+    purgePrefetchTts(true);
+    const why=await playSlideVideo(idx);
+    if(gen!==_playGen||!playing)return;  // 정지·일시정지·슬라이드 이동
+    dbg('🎞 영상 상영 종료('+why+')');qaLog('video_end',{slide:idx+1,why});
+  }else{
+    dbg('🎞 슬라이드 '+(idx+1)+' — 영상 파일이 덱에 없음'+(s.videoNote?'('+s.videoNote+')':'')+': 장표만 보여주고 마무리 (PPT를 다시 올리거나 🎞 영상 연결로 영상을 넣어주세요)');
+    setStatus('🎞 영상 파일이 없어 장표만 표시합니다 — 🎞 영상 연결로 파일을 넣을 수 있습니다');
+    await new Promise(r=>setTimeout(r,5000));
+    if(gen!==_playGen||!playing)return;
+  }
+  await new Promise(r=>setTimeout(r,1500));
+  if(gen!==_playGen||!playing)return;
+  if(idx<slides.length-1){await presentSlide(idx+1);return}  // 중간 장표의 영상 — 다음 슬라이드로 이어간다
+  await finishPresentation(true);  // 마지막 장표의 영상이 마무리 — 끝인사·질문 대기 없이 종료
+}
+// 영상 파일을 서버에 조각 업로드(저장된 덱에서 다시 불러와도 재생되게)
+async function uploadSlideVideo(pptId,n,v){
+  const blob=v.blob;if(!blob)return;const CH=6*1024*1024,total=blob.size;
+  for(let off=0;off<total;off+=CH){
+    const r=await fetch('/ppt-agent/api/ppts/'+pptId+'/video/'+n+'?off='+off+'&total='+total+'&ext='+(v.ext||'mp4'),{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:blob.slice(off,off+CH),credentials:'same-origin'});
+    if(!r.ok)throw new Error('영상 업로드 실패 '+r.status);
+  }
+}
+async function saveSlideVideos(pptId){
+  for(let i=0;i<slides.length;i++){const v=slides[i].video;if(v&&v.blob&&!v._saved){try{setStatus('🎞 슬라이드 '+(i+1)+' 영상 저장 중…');await uploadSlideVideo(pptId,i,v);v._saved=true;dbg('🎞 슬라이드 '+(i+1)+' 영상 저장 완료 ('+(v.blob.size/1048576).toFixed(1)+'MB)')}catch(e){dbg('⚠ 영상 저장 실패: '+e.message)}}}
+}
+// 수동 영상 연결 — 현재 선택한 슬라이드에 영상 파일을 붙인다(저장된 덱이면 서버에도 저장)
+function attachVideoPick(){if(playing){setStatus('⚠ 발표 중에는 영상을 연결할 수 없습니다');return}document.getElementById('videoInput').click()}
+async function attachVideoFile(f){
+  if(!f)return;const idx=Math.max(0,curSlideIdx);const s=slides[idx];if(!s)return;
+  const ext=(f.name.match(/\.(mp4|m4v|mov|webm)$/i)||[])[1];
+  if(!ext){setStatus('⚠ mp4/mov/webm 영상만 연결할 수 있습니다');return}
+  const lx=ext.toLowerCase(),mime=lx==='webm'?'video/webm':lx==='mov'?'video/quicktime':'video/mp4';
+  const vb=new Blob([f],{type:mime});
+  if(s._vidEl){try{s._vidEl.pause()}catch(e){}s._vidEl=null}
+  if(!String(s.note||'').trim())s.script='';  // 이전에 만든 자동 스크립트가 영상 장표 판정을 막지 않게
+  s.video={blob:vb,url:URL.createObjectURL(vb),mime,ext:lx==='m4v'?'mp4':lx,box:null};
+  renderSlide(idx);
+  setStatus('🎞 슬라이드 '+(idx+1)+'에 영상 연결: '+f.name);
+  if(currentPptId){try{await saveSlideVideos(currentPptId);setStatus('🎞 슬라이드 '+(idx+1)+' 영상 저장 완료 — 이 덱을 다시 불러와도 재생됩니다')}catch(e){setStatus('⚠ 영상 저장 실패')}}
 }
 // 시작화면 — 이전에 저장된 PPT가 있으면(+ 매칭되는 참고자료 있으면 함께 표시) 목록과 발표 버튼 노출
 async function renderStartResume(){
@@ -1087,7 +1188,7 @@ function parseSlideXML(x){
   const nsP='http://schemas.openxmlformats.org/presentationml/2006/main';
   const nsR='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
   const tree=d.getElementsByTagNameNS(nsP,'spTree')[0];
-  const shapes=[];let title='';const bullets=[];
+  const shapes=[];let title='';const bullets=[];const vidRids=[];let vidBox=null;
   if(tree){
     for(const node of tree.children){
       if(node.localName!=='sp')continue;
@@ -1105,6 +1206,10 @@ function parseSlideXML(x){
     // 깊이 상관없이 찾도록 변경 — 같은 rId가 중복으로 잡히는 것만(Choice/Fallback 중복 등) 걸러낸다.
     const seenRid=new Set();
     for(const node of tree.getElementsByTagNameNS(nsP,'pic')){
+      // [2026-11-13] 동영상 삽입 그림 — <a:videoFile r:link>(원본 링크) / <p14:media r:embed>(내장 미디어). 포스터 그림은 아래서 그대로 이미지로 처리하고,
+      // 실제 영상 파일은 rels 해석 단계(resolveSlideImages)에서 이 rId로 찾아 붙인다.
+      const _vf=node.getElementsByTagNameNS(nsA,'videoFile')[0],_pm=node.getElementsByTagNameNS('http://schemas.microsoft.com/office/powerpoint/2010/main','media')[0];
+      if(_vf||_pm){vidRids.push(...[_vf&&_vf.getAttributeNS(nsR,'link'),_pm&&_pm.getAttributeNS(nsR,'embed')].filter(Boolean));if(!vidBox)vidBox=readBox(node,nsA)}
       const blip=node.getElementsByTagNameNS(nsA,'blip')[0];
       const rId=blip&&blip.getAttributeNS(nsR,'embed');
       if(rId&&seenRid.has(rId))continue;
@@ -1122,7 +1227,7 @@ function parseSlideXML(x){
     const first=shapes.find(sh=>sh.type==='text');
     if(first){title=first.text;const bi=bullets.indexOf(first.text);if(bi>=0)bullets.splice(bi,1)}
   }
-  return{title,bullets:bullets.slice(0,20),shapes,note:''};
+  return{title,bullets:bullets.slice(0,20),shapes,note:'',vidRids,vidBox};
 }
 // 슬라이드 하나의 이미지(rels + media 바이너리)만 해석 — 전체 덱을 한 번에 안 긁어오고
 // 필요한 슬라이드부터 순서대로 채워서, 뒤 슬라이드 이미지 때문에 1번 슬라이드 음성 시작이
@@ -1150,6 +1255,19 @@ async function resolveSlideImages(z,sl,relsPath){
   const basePath=relsPath.replace(/\/_rels\/[^/]+$/,'');
   for(const m of relsText.matchAll(/<Relationship\b[^>]*>/g)){
     const idM=m[0].match(/Id="([^"]+)"/);
+    // [2026-11-13] 동영상 관계 — 내장 mp4 등은 blob으로 꺼내 sl.video에 붙인다(포스터 그림과 별개). 외부 링크/미지원 코덱은 이유만 기록.
+    {const _ty=(m[0].match(/Type="([^"]+)"/)||[])[1]||'',_tg=(m[0].match(/Target="([^"]*)"/)||[])[1]||'',_ext=(_tg.match(/\.(mp4|m4v|mov|webm|ogv|wmv|avi|mpe?g|mkv)(?:[?#].*)?$/i)||[])[1];
+      if(idM&&_ext&&(/\/(video|media)$/.test(_ty)||(sl.vidRids||[]).includes(idM[1]))){
+        if(/TargetMode="External"/i.test(m[0])){sl.videoNote='영상이 PPT 안에 들어있지 않고 외부 파일/링크로 연결돼 있습니다: '+_tg.slice(0,80)}
+        else if(!/^(mp4|m4v|mov|webm|ogv)$/i.test(_ext)){sl.videoNote='브라우저가 재생할 수 없는 영상 형식입니다(.'+_ext+') — mp4로 변환해 주세요'}
+        else if(!sl.video){
+          const vf=z.file(resolvePartPath(basePath,_tg));
+          if(vf){const lx=_ext.toLowerCase(),mime=lx==='webm'?'video/webm':lx==='ogv'?'video/ogg':lx==='mov'?'video/quicktime':'video/mp4';
+            const vb=new Blob([await vf.async('arraybuffer')],{type:mime});
+            sl.video={blob:vb,url:URL.createObjectURL(vb),mime,ext:lx==='m4v'?'mp4':lx,box:sl.vidBox||null};
+            console.log('🎞 슬라이드 영상 추출:',relsPath,(vb.size/1048576).toFixed(1)+'MB',mime)}
+        }
+        continue}}
     // [2026-10-01] 예전엔 Target 경로에 "media/"라는 폴더명이 그대로 들어있어야만 매칭했는데,
     // 변환 도구에 따라 폴더명이 다를 수 있어 확장자 기준으로 넓힘 — 실제로 이미지 파일이기만 하면 됨.
     const tgtM=m[0].match(/Target="([^"]+\.(?:png|jpe?g|gif|bmp|emf|wmf|tiff?|svg)[^"]*)"/i);
@@ -1294,6 +1412,7 @@ const r=await fetch(LOCAL_LLM,{method:'POST',headers:{'Content-Type':'applicatio
 function ensureScript(idx){
   const s=slides[idx];
   if(s.script)return Promise.resolve(true);
+  if(slideVideoKind(idx))return Promise.resolve(true);  // [2026-11-13] 영상 장표는 낭독할 스크립트가 없다
   if(!s._scriptPromise){
     s._scriptPromise=generateScript(idx).catch(e=>{console.error('script gen fail:',e);return false}).finally(()=>{s._scriptPromise=null});
   }
@@ -1401,6 +1520,7 @@ function scriptToSentences(script){
 // 그래서 _playGen 세대 체크가 필요 없다.
 function prefetchNextSlide(idx){
   const nxt=idx+1;if(nxt>=slides.length)return;
+  if(slideVideoKind(nxt))return;  // 영상 장표는 스크립트·TTS 선생성 대상 아님
   const ns=slides[nxt];
   ensureScript(nxt).then(()=>{
     if(!ns.script)return;
@@ -1565,7 +1685,12 @@ function ttsNormalize(text){
   t=t.replace(_PARTICLE_DETACHED,'$1$2');
   // 2) 숫자 — 천단위 쉼표 제거 → 범위 → 퍼센트 → 날짜 → 시각 → 단위 → 소수 → 일반 정수 (영문 인접 숫자 E2E/3D/Q7은 보호)
   t=t.replace(/(\d),(?=\d{3}(?!\d))/g,'$1');
+  // [2026-11-13] 점으로 쓴 날짜(2026.10.14 / 2026.07 / ~10.22)를 소수점으로 읽던 오류 — "이천이십육 쩜 일 영.14"로 발음됐다.
+  t=t.replace(/(?<![\d.])((?:19|20)\d{2})\.(0?[1-9]|1[0-2])\.(0?[1-9]|[12]\d|3[01])(?![\d])/g,(m,y,mo,d)=>y+'년 '+(+mo)+'월 '+(+d)+'일');
+  t=t.replace(/(?<![\d.])((?:19|20)\d{2})\.(0?[1-9]|1[0-2])(?![\d.])/g,(m,y,mo)=>y+'년 '+(+mo)+'월');
+  t=t.replace(/(\d{1,2}월)\s*[~∼-]\s*(0?[1-9]|1[0-2])(?![\d.]|[월일년시분])/g,(m,a,b)=>a+'에서 '+(+b)+'월');   // 2026.10~11 → 시월에서 십일월
   t=t.replace(/([\d일월년])\s*[~∼]\s*(?=\d)/g,'$1에서 ');
+  t=t.replace(/(에서\s+)(0?[1-9]|1[0-2])\.(0?[1-9]|[12]\d|3[01])(?![\d.])/g,(m,a,mo,d)=>a+(+mo)+'월 '+(+d)+'일');
   const NB='(?<![A-Za-z\\d.])';
   t=t.replace(new RegExp(NB+'(\\d+(?:\\.\\d+)?)\\s*%','g'),(m,a)=>a+'퍼센트');
   t=t.replace(new RegExp(NB+'(\\d{4})\\s*년','g'),(m,y)=>_sino(+y)+'년');
@@ -1573,7 +1698,7 @@ function ttsNormalize(text){
   t=t.replace(new RegExp(NB+'(\\d{1,2})\\s*일(?![가-힣])','g'),(m,d)=>_sino(+d)+'일');
   t=t.replace(new RegExp(NB+'(\\d{1,2})\\s*시(?!간|대|스|도|장|작|각|설|민|행|범|청|험|점|기|나)(?:\\s*(\\d{1,2})\\s*분)?','g'),(m,h,mi)=>(_native(+h,0)||_sino(+h))+' 시'+(mi?(' '+_sino(+mi)+' 분'):''));
   t=t.replace(new RegExp(NB+'(\\d{1,2})\\s*('+_NATIVE_UNIT+')','g'),(m,n,u)=>(_native(+n,1)||_sino(+n))+' '+u);
-  t=t.replace(new RegExp(NB+'(\\d+)\\.(\\d+)(?!\\d)','g'),(m,a,b,off,str)=>_sino(+a)+' 점 '+[...b].map(c=>_SINO[+c]).join(' ')+(_UNIT_SP.test(str.slice(off+m.length))?' ':''));
+  t=t.replace(new RegExp(NB+'(\\d+)\\.(\\d+)(?!\\d)','g'),(m,a,b,off,str)=>_sino(+a)+' 쩜 '+[...b].map(c=>_SINO[+c]).join(' ')+(_UNIT_SP.test(str.slice(off+m.length))?' ':''));
   t=t.replace(new RegExp(NB+'(\\d+)(?![A-Za-z\\d])','g'),(m,n,off,str)=>{const r=n.length>12?[...n].map(c=>_SINO[+c]).join(' '):_sino(+n);return _UNIT_SP.test(str.slice(off+m.length))?r+' ':r});
   // 3) 문장부호 — 흥분/처짐 억양의 직접 트리거 제거·통일
   t=t.replace(/[“”‘’"']/g,'').replace(/[!！]+/g,'.').replace(/(\.{2,}|…+)/g,'.').replace(/[~∼]/g,' ');
@@ -1625,7 +1750,7 @@ try{
   if(ttsEngine==='openai'){
     // [2026-09-29] 네트워크 순간 오류 한 번으로 바로 로컬→브라우저 폴백까지 떨어져
     // 목소리가 튀는 걸 막기 위해 1회 재시도(200ms 후) — 일시적 오류가 가장 흔한 트리거였음.
-    for(let attempt=0;attempt<2;attempt++){
+    for(let attempt=0;attempt<3;attempt++){
       if(signal&&signal.aborted)break;  // [2026-10-05 v2] 외부 중단 — 재시도 루프 즉시 탈출
       try{
         // [2026-10-13 점검] 발음 꼬임 방지 — ①입력 정제(마크다운·기호·범위표기·%)+영문 한글화(로컬 경로와 동일 koNizeTts):
@@ -1639,14 +1764,19 @@ try{
         if(r.ok){const b=await r.blob();
           if(b.size>1000){
             const _sec=await wavSeconds(b),_n=_oin.replace(/[^가-힣A-Za-z0-9]/g,'').length,_ratio=_sec&&_n?_sec/_n:null;
-            if(_ratio!==null&&(_ratio<0.05||_ratio>0.6)&&attempt===0){dbg('⚠ TTS[openai] 길이 이상('+_sec.toFixed(1)+'s/'+_n+'자) — 재생성');qaLog('tts_openai_anomaly',{sec:+_sec.toFixed(2),chars:_n});continue}
-            dbg('TTS[openai] OK '+b.size+'B '+(Date.now()-_t0)+'ms'+(_sec?' '+_sec.toFixed(1)+'s':''));return _localUrl(URL.createObjectURL(b))
+            if(_ratio!==null&&(_ratio<0.05||_ratio>0.6)&&attempt<2){dbg('⚠ TTS[openai] 길이 이상('+_sec.toFixed(1)+'s/'+_n+'자) — 재생성');qaLog('tts_openai_anomaly',{sec:+_sec.toFixed(2),chars:_n});continue}
+            const _adj=_rateAdj(r.headers.get('X-TTS-Rate'));dbg('TTS[openai] OK '+b.size+'B '+(Date.now()-_t0)+'ms'+(_sec?' '+_sec.toFixed(1)+'s':'')+(_adj!==1?' 속도보정×'+_adj.toFixed(2):'')+((+r.headers.get('X-TTS-Tries')>1)?' 재생성'+r.headers.get('X-TTS-Tries'):''));return _localUrl(_setAdj(URL.createObjectURL(b),_adj))
           }
           console.warn('TTS(openai): 응답 크기 이상',b.size)}
         else{console.warn('TTS(openai) 실패:',r.status,'attempt',attempt);dbg('TTS[openai] HTTP'+r.status)}
       }catch(e){console.warn('TTS(openai) 예외:',e.message,'attempt',attempt);dbg('TTS[openai] 예외:'+e.message)}
-      if(attempt===0)await new Promise(res=>setTimeout(res,200));
+      if(attempt<2)await new Promise(res=>setTimeout(res,attempt===0?200:1200));
     }
+    // [2026-11-13] OpenAI 엔진 선택 중에는 로컬(mlx) 음성으로 절대 떨어지지 않는다 — 예전엔 여기서 아래 로컬 경로로 이어져,
+    // 일시 오류 때 그 문장만 다른 화자·다른 속도·다른 피치로 나가 "OpenAI인데 중간중간 음성 스타일이 바뀐다"의 원인이 됐다.
+    // 실패 문장은 자막으로 대체하고 건너뛴다(브라우저 폴백 금지 정책과 동일).
+    if(!(signal&&signal.aborted)){dbg('🚫 OpenAI 음성 생성 실패(3회) — 다른 음성으로 대체하지 않고 이 문장은 자막으로 대체');qaLog('tts_openai_fail',{chars:String(text).length})}
+    return null;
   }
   // [2026-10-04] 로컬 TTS 정지 방어 — 타임아웃(정상 생성은 1~2초). 서버가 오래 붙잡혀도
   // "변환 중…"에 갇히지 않게 하고, 실패 시 null 반환으로 브라우저 폴백이 이어받는다.
@@ -3921,7 +4051,9 @@ async function presentSlide(idx){
   if(audioEl){audioEl.pause();audioEl=null}
   try{speechSynthesis.cancel()}catch(e){}
   ttsSpeaking=false;
+  _vidAbort();  // 이전 영상 재생 대기 해제(일시정지 후 재개·슬라이드 이동 시 새 체인이 이어받는다)
   curSlideIdx=idx;const s=slides[idx];
+  {const _vk=slideVideoKind(idx);if(_vk)return presentVideoSlide(idx,gen,_vk)}  // [2026-11-13] 영상 장표 — 낭독 없이 영상 상영 후 종료
   // [2026-10-04 v5] prefetchNextSlide는 이 함수 끝(문장 큐 등록 직후)으로 이동 — 시작 시점에 호출하면
   // 다음 슬라이드 스크립트가 본 슬라이드 스크립트와 '동시에' 생성돼, 먼저 끝나는 쪽(=다음 슬라이드)이
   // TTS 큐 전체를 선점. 실측: 본 슬라이드 첫 문장이 다음 슬라이드 10문장 뒤에 줄서 20초+ 대기했다.
@@ -4019,7 +4151,9 @@ function renderSlide(idx){
     }).join('');
     s._view={ox:_ox,oy:_oy,rx:_rx,ry:_ry};
     const [_w,_h]=_fitCanvasSize(el,_rx,_ry);
+    const _vPrev=slides.map(x=>x&&x._vidEl).find(v=>v&&v.isConnected&&!v.paused&&!v.ended)||null;  // 재생 중 영상이 재렌더로 끊기지 않게
     el.innerHTML=`<div class="slideCanvas" style="width:${_w}px;height:${_h}px;aspect-ratio:${_rx}/${_ry}">${body}</div>`;
+    if(s.video&&s.video.url){const _v=_ensureVideoEl(s);_videoPos(s,_v,_ox,_oy,_rx,_ry);el.firstChild.appendChild(_v);if(_vPrev===_v&&_v.paused&&!_v.ended)_v.play().catch(()=>{})}
     dbg('슬라이드 '+(idx+1)+' 렌더 '+sz.w+'x'+sz.h+' 도형'+s.shapes.length+(_crop?' 크롭('+Math.round(_cw/sz.w*100)+'%x'+Math.round(_ch/sz.h*100)+'%)':' 전체')+' → 캔버스 '+Math.floor(_w)+'x'+Math.floor(_h)+' 중앙정렬 [박스 '+s.shapes.slice(0,3).map(sh=>sh.box?Math.round(sh.box.x/sz.w*100)+','+Math.round(sh.box.y/sz.h*100)+' '+Math.round(sh.box.w/sz.w*100)+'x'+Math.round(sh.box.h/sz.h*100)+'%':'?').join(' / ')+']');
   }else{
     el.classList.remove('canvasMode');
@@ -4027,6 +4161,7 @@ function renderSlide(idx){
     const imgs=(s.shapes||[]).filter(sh=>sh.type==='image'&&sh.src).map(sh=>sh.src).concat(s.images||[]);
     imgs.forEach(u=>{h+='<img src="'+u+'"/>'});
     el.innerHTML=h||'<p style="color:var(--mut);text-align:center;margin-top:40vh">빈 슬라이드</p>';
+    if(s.video&&s.video.url){const _v=_ensureVideoEl(s);_v.style.cssText='position:static;width:100%;max-height:80vh';el.appendChild(_v)}
   }
   document.getElementById('sldNum').textContent=(idx+1)+' / '+slides.length;document.getElementById('progBar').style.width=((idx+1)/slides.length*100)+'%';document.querySelectorAll('.sldItem').forEach((e,i)=>e.classList.toggle('cur',i===idx))}
 // 발표 중이 아닐 때(사이드바 미리보기 클릭 등)도 백그라운드 이미지 로딩을 기다렸다 그려서 같은
@@ -4304,11 +4439,11 @@ pregenPhrases();  // [2026-10-05] Q&A 문구 프리생성을 발표 '시작'으�
 // 순차 체인으로 항상 1개만 활성 — TTS는 즉시 연결을 쓴다. 첫 슬라이드는 presentSlide가
 // ensureScript를 await하므로 "충분히 변환한 뒤 시작"이 유지된다.
 let _scriptChain=Promise.resolve();
-slides.forEach((_,i)=>{_scriptChain=_scriptChain.then(()=>ensureScript(i)).catch(()=>{})});
+slides.forEach((_,i)=>{_scriptChain=_scriptChain.then(()=>ensureScript(i)).catch(()=>{})});  // (영상 장표는 ensureScript가 즉시 통과)
 await presentSlide(Math.max(curSlideIdx,0));
 }  // [2026-10-05] pregenPhrases 호출은 발표 '시작' 지점으로 이동 (아래 발표 종료 후 실행이던 호출은 발표 내내 캐시가 빈 원인이었다)
-function pausePresentation(){startPrepEnd(true);playing=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('일시정지');if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}  // [2026-10-04 v9] _audioFin 즉시 해제 — 120s 고아 감시자 방지
-function stopAll(){aiBusyEnd();startPrepEnd(true);playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);unduckVol();_deferQA=null;_deferPending=[];_deferAskedAt=0;_pendingQ=null;_qaGen++;_lastQ='';_answeringQKey='';_answeringQRaw='';_lastFinalKey='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring'||qaState==='holding'||qaState==='confirming_continue')qaState='idle';clearTimeout(_holdTimer);clearTimeout(_continueSilenceTimer);resolveDeferred(false);setStatus('정지')}  // [2026-10-07 v10] 재접수 폐기 키도 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
+function pausePresentation(){_vidAbort();startPrepEnd(true);playing=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('일시정지');if(audioEl)audioEl.pause();stopListening();setStatus('⏸ 일시정지')}  // [2026-10-04 v9] _audioFin 즉시 해제 — 120s 고아 감시자 방지
+function stopAll(){_vidAbort();aiBusyEnd();startPrepEnd(true);playing=false;interrupted=false;_presStarted=false;document.getElementById('btnPlay').textContent='▶';if(_audioFin)_audioFin('정지');if(audioEl){audioEl.pause();audioEl=null}stopListening();purgePrefetchTts(true);unduckVol();_deferQA=null;_deferPending=[];_deferAskedAt=0;_pendingQ=null;_qaGen++;_lastQ='';_answeringQKey='';_answeringQRaw='';_lastFinalKey='';clearTimeout(_knowRecheckTimer);if(qaState==='deferring'||qaState==='holding'||qaState==='confirming_continue')qaState='idle';clearTimeout(_holdTimer);clearTimeout(_continueSilenceTimer);resolveDeferred(false);setStatus('정지')}  // [2026-10-07 v10] 재접수 폐기 키도 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리. [2026-10-05 v9] 대기 질문·세대 가드 정리  // [2026-10-04 v9] 동일. [2026-10-05] 큐 전체 폐기 — 정지 후에도 백로그 생성이 수분간 GPU를 점유하는 좀비 실측(정지 +89.7s → +188s까지 생성 지속). [2026-10-05 v6] 지연 답변 상태·제안 대기도 정리
 // ── 마지막 슬라이드 발표 완료 → Q&A 시간 → URL 열기 ──
 let _closingTimer=null;
 function extractURL(){
@@ -4343,14 +4478,14 @@ async function startClosingQA(){
   },CLOSING_WAIT_MS);
 }
 let _finishing=false,_finishTok=0;
-async function finishPresentation(){
+async function finishPresentation(silent){  // silent: [2026-11-13] 영상 장표로 마무리 — 끝인사 멘트 생략
   clearTimeout(_closingTimer);
   const _wasClosing=qaState==='closing_qa';
   const _tok=++_finishTok;
   // [2026-10-15] 끝인사 재생 중에도 closing_qa를 유지 — 그 사이 질문이 들어오면 closing_qa 핸들러가 마무리를 취소(_finishTok)하고 질문으로 받는다
   qaState=_wasClosing?'closing_qa':'idle';_finishing=_wasClosing;
   // [2026-10-13] 끝인사는 질문이 없음을 확인한 뒤 말한다(재생·생성 대기 상한 포함) — 이동 전에 끝까지 들리게 먼저 재생
-  try{setStatus('💬 마무리 인사');await speakUnified(CLOSING_END)}catch(e){}
+  if(!silent){try{setStatus('💬 마무리 인사');await speakUnified(CLOSING_END)}catch(e){}}
   if(_tok!==_finishTok)return;  // 끝인사 중 질문이 들어와 마무리가 취소됨
   _finishing=false;qaState='idle';
   releasePresLock();  // [2026-10-05] 발표 독점 락 해제 — 다른 창이 발표를 시작할 수 있게
@@ -4378,6 +4513,7 @@ document.getElementById('btnStop').onclick=hardStop;
 // ── 슬라이드 넘기기 — 발표 중에도 건너뛰기 가능 ──
 function goToSlide(idx){
   if(idx<0||idx>=slides.length)return;
+  _vidAbort();
   if(audioEl){audioEl.pause();audioEl=null}
   try{speechSynthesis.cancel()}catch(e){}
   ttsSpeaking=false;interrupted=false;qaState='idle';
@@ -4405,10 +4541,12 @@ async function handleFile(file){setStatus('📄 파싱 중…');document.getElem
 const ric=window.requestIdleCallback||(fn=>setTimeout(fn,500));
 ric(async()=>{
   try{
+    try{await Promise.all(slides.map(s=>s._imagesReady&&Promise.resolve(s._imagesReady).catch(()=>{})))}catch(e){}  // 영상·이미지 해석 완료 후 저장
     const sv=await slidesToJsonSafe(slides);
     const saved=await apiJson('/ppt-agent/api/ppts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:file.name,slides:sv})});
     currentPptId=saved.id;loadAnnotations();flushPendingAnnotations();  // [2026-10-04] 주석 대기열 정산
     console.log('PPT saved');
+    saveSlideVideos(saved.id).catch(()=>{});  // [2026-11-13] 슬라이드 영상은 JSON과 별도로 파일 저장
   }catch(e){console.warn('PPT save fail:',e)}
 },{timeout:8000});
 ensureScript(0)}}catch(e){setStatus('❌ '+e.message);document.getElementById('uploadScreen').style.display='flex'}}
@@ -4702,7 +4840,7 @@ let _warmTok=0;
 async function warmPointerVision(from){
   if(!POINTER_ON)return;const tok=++_warmTok;
   for(let i=Math.max(1,from);i<slides.length;i++){
-    const s=slides[i];if(!s||!s.shapes)continue;
+    const s=slides[i];if(!s||!s.shapes||slideVideoKind(i))continue;
     try{if(s._imagesReady)await s._imagesReady}catch(e){}
     for(const sh of s.shapes){if(tok!==_warmTok||!POINTER_ON)return;if(sh.type==='image'&&sh.src)try{await _imageRegions(sh)}catch(e){}}
   }

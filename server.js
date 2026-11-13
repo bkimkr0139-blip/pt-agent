@@ -1855,6 +1855,66 @@ async function ttsAsrText(wav) {
     return j && j.ok === false ? null : String((j && j.text) || '');  // dropped(무음·너무 짧음)는 null=판정 불가
   } catch (_) { return null; }
 }
+// ── [2026-11-13] OpenAI TTS 음향 일관성 게이트 ──
+// 실측(동일 voice·동일 설정, 문장당 3회 생성): 말속도 4.35~5.68자/초(최대 ±15%), 음량(RMS) 0.104~0.135, 음높이 중앙값 180~198Hz.
+// gpt-4o-mini-tts는 요청마다 속도·톤이 달라 발표 도중 "빨라졌다 느려졌다/목소리 톤이 바뀐다"가 생겼고, 지금까지는 글자 재현율(ASR)만
+// 검증해 이런 변동이 그대로 통과됐다. ①말속도·음높이가 기준 밖이면 재생성 ②남은 편차는 음량 정규화+클라이언트 배속 보정(X-TTS-Rate)으로 흡수.
+// 기준값은 검증된 고정 문구 캐시 846개의 분포(음높이 p10~p90 174~200Hz)와 위 실측에서 잡았다.
+const TTS_REF_RATE = 5.1, TTS_RATE_BAND = [4.55, 5.75], TTS_F0_BAND = [165, 210], TTS_REF_RMS = 0.12, TTS_RATE_MIN_CHARS = 8;
+function wavPcm(buf) {
+  try {
+    if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF') return null;
+    let off = 12, sr = 24000, ch = 1, bits = 16, fmtOk = false;
+    while (off + 8 <= buf.length) {
+      const id = buf.toString('ascii', off, off + 4); let sz = buf.readUInt32LE(off + 4);
+      if (id === 'fmt ') { if (buf.readUInt16LE(off + 8) !== 1) return null; ch = buf.readUInt16LE(off + 10); sr = buf.readUInt32LE(off + 12); bits = buf.readUInt16LE(off + 22); fmtOk = true; }
+      if (id === 'data') { if (!fmtOk || bits !== 16 || sz > buf.length - off - 8) sz = buf.length - off - 8; return { sr, ch, dataOff: off + 8, dataLen: sz - (sz % (2 * ch)) }; }
+      off += 8 + sz + (sz & 1);
+    }
+  } catch (_) {}
+  return null;
+}
+function wavSamples(buf, w) {
+  const n = Math.floor(w.dataLen / (2 * w.ch)), x = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let s = 0; for (let c = 0; c < w.ch; c++) s += buf.readInt16LE(w.dataOff + (i * w.ch + c) * 2); x[i] = s / w.ch / 32768; }
+  return x;
+}
+// 말속도(한글 글자/초, 앞뒤 무음 제외)·음높이 중앙값(자기상관)·RMS. 분석 불가면 null(=게이트 통과).
+function ttsAcoustics(buf, chars, wantF0) {
+  const w = wavPcm(buf); if (!w) return null;
+  const x = wavSamples(buf, w), sr = w.sr, fl = Math.floor(sr * 0.04), hop = Math.floor(sr * 0.02), nfr = Math.floor((x.length - fl) / hop);
+  if (nfr < 8) return null;
+  const rms = new Float32Array(nfr); let mx = 0;
+  for (let i = 0; i < nfr; i++) { let s = 0; const o = i * hop; for (let k = 0; k < fl; k++) s += x[o + k] * x[o + k]; rms[i] = Math.sqrt(s / fl); if (rms[i] > mx) mx = rms[i]; }
+  const thr = Math.max(0.01, mx * 0.08); let first = -1, last = -1;
+  for (let i = 0; i < nfr; i++) if (rms[i] > thr) { if (first < 0) first = i; last = i; }
+  if (first < 0 || last - first < 5) return null;
+  const speech = (last - first + 1) * hop / sr; let e = 0, cnt = 0;
+  for (let i = first; i <= last; i++) { e += rms[i] * rms[i]; cnt++; }
+  const out = { speech, rate: chars >= TTS_RATE_MIN_CHARS ? chars / speech : null, rms: Math.sqrt(e / cnt), f0: null };
+  if (wantF0) {
+    const lo = Math.floor(sr / 400), hi = Math.floor(sr / 70), f0s = [];
+    for (let i = first; i <= last; i += 2) {
+      if (rms[i] < mx * 0.2) continue;
+      const o = i * hop; let a0 = 0; for (let k = 0; k < fl; k++) a0 += x[o + k] * x[o + k]; if (a0 <= 0) continue;
+      let bestK = -1, bestV = 0;
+      for (let lag = lo; lag < hi; lag += 1) { let s = 0; for (let k = 0; k < fl - lag; k++) s += x[o + k] * x[o + k + lag]; if (s > bestV) { bestV = s; bestK = lag; } }
+      if (bestK > 0 && bestV / a0 > 0.5) f0s.push(sr / bestK);
+    }
+    if (f0s.length >= 5) { f0s.sort((p, q) => p - q); out.f0 = f0s[Math.floor(f0s.length / 2)]; }
+  }
+  return out;
+}
+// 음량 정규화 — 기준 RMS(0.12)로 맞추되 보정폭은 0.75~1.35배, 클리핑 방지.
+function ttsNormalizeLevel(buf, rmsNow) {
+  const w = wavPcm(buf); if (!w || !(rmsNow > 0.005)) return buf;
+  const g = Math.max(0.75, Math.min(1.35, TTS_REF_RMS / rmsNow)); if (Math.abs(g - 1) < 0.03) return buf;
+  const out = Buffer.from(buf);
+  for (let i = 0; i < w.dataLen / 2; i++) { const o = w.dataOff + i * 2; out.writeInt16LE(Math.max(-32000, Math.min(32000, Math.round(buf.readInt16LE(o) * g))), o); }
+  return out;
+}
+const ttsDev = ac => !ac ? 0 : Math.max(ac.rate ? Math.abs(ac.rate - TTS_REF_RATE) / TTS_REF_RATE : 0, ac.f0 ? Math.abs(ac.f0 - 188) / 188 : 0);
+const ttsAcOk = ac => !ac || ((!ac.rate || (ac.rate >= TTS_RATE_BAND[0] && ac.rate <= TTS_RATE_BAND[1])) && (!ac.f0 || (ac.f0 >= TTS_F0_BAND[0] && ac.f0 <= TTS_F0_BAND[1])));
 async function openaiTtsOnce(input, voice) {
   const r = await fetch(`${N8N_BASE}/webhook/koen-openai-tts-bin`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1871,23 +1931,41 @@ app.post(`${PREFIX}/api/tts-openai`, requireApiAuth, async (req, res) => {
   if (!input) return res.status(400).json({ error: 'input 필요' });
   if (!(req.user.role === 'admin' || Number(req.user.allow_openai == null ? 1 : req.user.allow_openai))) return res.status(403).json({ error: 'OpenAI 미허용 계정' });
   const cacheable = input.length <= TTS_PHRASE_MAX;
+  const nChars = hangulOnly(input).length;
   const cfile = path.join(TTS_CACHE_DIR, crypto.createHash('sha1').update(voice + '\n' + input).digest('hex') + '.wav');
-  if (cacheable) { try { const b = fs.readFileSync(cfile); res.set({ 'Content-Type': 'audio/wav', 'X-TTS-Source': 'cache' }); return res.send(b); } catch (_) {} }
-  const t0 = Date.now(); let best = null, bestR = -1, lastErr = null;
-  const tries = cacheable ? TTS_PHRASE_TRIES : TTS_MAX_TRIES;
+  if (cacheable) {
+    try {
+      let b = fs.readFileSync(cfile); const hd = { 'Content-Type': 'audio/wav', 'X-TTS-Source': 'cache' };
+      try { const ac = ttsAcoustics(b, nChars, false); if (ac) { b = ttsNormalizeLevel(b, ac.rms); if (ac.rate) hd['X-TTS-Rate'] = ac.rate.toFixed(2); } } catch (_) {}
+      res.set(hd); return res.send(b);
+    } catch (_) {}
+  }
+  const t0 = Date.now(); let lastErr = null;
+  const tries = cacheable ? TTS_PHRASE_TRIES : TTS_MAX_TRIES + 1;
+  const cands = [];   // {wav, r(재현율), asrOk, ac}
   for (let i = 0; i < tries; i++) {
     let wav;
     try { wav = await openaiTtsOnce(input, voice); } catch (e) { lastErr = e; continue; }
     const tr = await ttsAsrText(wav);
     const r = tr == null ? 1 : ttsRecall(input, tr);  // ASR 불가 → fail-open(통과)
-    if (r > bestR) { best = wav; bestR = r; }
     const exact = tr != null && hangulOnly(tr) === hangulOnly(input);
-    if (tr == null || (cacheable ? exact : r >= TTS_RECALL_MIN)) break;  // ASR 불가면 통과, 고정 문구는 완전 일치, 일반 문장은 재현율 기준
-    console.log(`[TTS-OPENAI 재생성] voice=${voice} try=${i + 1} recall=${r.toFixed(2)} input=${JSON.stringify(input.slice(0, 24))} heard=${JSON.stringify((tr || '').slice(0, 30))}`);
+    const asrOk = tr == null || (cacheable ? exact : r >= TTS_RECALL_MIN);
+    let ac = null; try { ac = ttsAcoustics(wav, nChars, true); } catch (_) {}
+    const acOk = ttsAcOk(ac);
+    cands.push({ wav, r, asrOk, ac, acOk });
+    if (asrOk && acOk) break;   // 글자도 맞고 속도·음높이도 기준 안 → 채택
+    if (cands.filter(c => c.asrOk).length >= 3) break;   // 글자는 맞는데 기준만 벗어나는 경우 3번째 후보에서 멈추고 기준에 가장 가까운 것을 채택(지연 상한)
+    console.log(`[TTS-OPENAI 재생성] voice=${voice} try=${i + 1} recall=${r.toFixed(2)} asrOk=${asrOk} rate=${ac && ac.rate ? ac.rate.toFixed(2) : '-'} f0=${ac && ac.f0 ? Math.round(ac.f0) : '-'} input=${JSON.stringify(input.slice(0, 24))} heard=${JSON.stringify((tr || '').slice(0, 30))}`);
   }
-  if (!best) return res.status(502).json({ error: 'tts 실패', message: String((lastErr && lastErr.message) || '').slice(0, 120) });
-  if (cacheable && bestR >= TTS_CACHE_RECALL) { try { fs.writeFileSync(cfile, best); } catch (_) {} }
-  res.set({ 'Content-Type': 'audio/wav', 'X-TTS-Source': 'gen', 'X-TTS-Recall': bestR.toFixed(2), 'X-TTS-Ms': String(Date.now() - t0) });
+  if (!cands.length) return res.status(502).json({ error: 'tts 실패', message: String((lastErr && lastErr.message) || '').slice(0, 120) });
+  // 선택: ① 글자 검증 통과분 중 기준(속도·음높이)에 가장 가까운 것 ② 통과분이 없으면 재현율 최고
+  const pass = cands.filter(c => c.asrOk);
+  const pick = pass.length ? pass.reduce((p, q) => ttsDev(q.ac) < ttsDev(p.ac) ? q : p) : cands.reduce((p, q) => q.r > p.r ? q : p);
+  let best = pick.wav; const bestR = pick.r;
+  const hd = { 'Content-Type': 'audio/wav', 'X-TTS-Source': 'gen', 'X-TTS-Recall': bestR.toFixed(2), 'X-TTS-Ms': String(Date.now() - t0), 'X-TTS-Tries': String(cands.length) };
+  if (pick.ac) { best = ttsNormalizeLevel(best, pick.ac.rms); if (pick.ac.rate) hd['X-TTS-Rate'] = pick.ac.rate.toFixed(2); }
+  if (cacheable && bestR >= TTS_CACHE_RECALL && pick.asrOk) { try { fs.writeFileSync(cfile, best); } catch (_) {} }   // 검증본(후보 중 기준에 가장 가까운 것)을 캐시 — 캐시가 곧 "고정 음성"
+  res.set(hd);
   res.send(best);
 });
 app.post(`${PREFIX}/api/dbg`, requireApiAuth, (req, res) => {
@@ -1971,12 +2049,58 @@ app.get(`${PREFIX}/api/ppts`, requireApiAuth, (req, res) => {
 app.get(`${PREFIX}/api/ppts/:id`, requireApiAuth, (req, res) => {
   const row = db.prepare('SELECT * FROM presentations WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
   if (!row) return res.status(404).json({ error: 'not found' });
-  res.json({ id: row.id, name: row.name, size: row.size_bytes, slideCount: row.slide_count, createdAt: row.created_at, slides: JSON.parse(row.slides_json) });
+  const slidesArr = JSON.parse(row.slides_json);
+  slidesArr.forEach((sl, n) => { const v = pptVideoFind(row.id, n); if (v) { sl.videoUrl = `${PREFIX}/api/ppts/${row.id}/video/${n}`; sl.videoMime = v.mime; } });
+  res.json({ id: row.id, name: row.name, size: row.size_bytes, slideCount: row.slide_count, createdAt: row.created_at, slides: slidesArr });
+});
+// ── 슬라이드 동영상 저장소 [2026-11-13] — PPT 안에 삽입된 영상은 base64 JSON에 못 넣으므로(크기) 파일로 분리 저장.
+// 업로드는 6MB 조각 PUT(off 순차) — 게이트웨이·터널 본문 한도에 걸리지 않게. 재생은 Range 지원(sendFile).
+const PPT_VIDEO_DIR = path.join(__dirname, 'data', 'ppt-video');
+const PPT_VIDEO_EXT = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' };
+const PPT_VIDEO_MAX = 800 * 1024 * 1024;
+function pptVideoFind(id, n) {
+  for (const ext of Object.keys(PPT_VIDEO_EXT)) {
+    const f = path.join(PPT_VIDEO_DIR, `${Number(id)}-${Number(n)}.${ext}`);
+    if (fs.existsSync(f)) return { file: f, ext, mime: PPT_VIDEO_EXT[ext] };
+  }
+  return null;
+}
+function pptVideoRemoveAll(id) {
+  try { for (const f of fs.readdirSync(PPT_VIDEO_DIR)) if (f.startsWith(`${Number(id)}-`)) fs.unlinkSync(path.join(PPT_VIDEO_DIR, f)); } catch { /* 폴더 없음 */ }
+}
+app.put(`${PREFIX}/api/ppts/:id/video/:n`, requireApiAuth, express.raw({ type: 'application/octet-stream', limit: '12mb' }), (req, res) => {
+  const row = db.prepare('SELECT id,slide_count FROM presentations WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+  if (!row) return res.status(404).json({ error: 'not found' });
+  const n = Number(req.params.n), off = Number(req.query.off), total = Number(req.query.total), ext = String(req.query.ext || '');
+  if (!Number.isInteger(n) || n < 0 || n >= row.slide_count || !PPT_VIDEO_EXT[ext]) return res.status(400).json({ error: 'bad slide/ext' });
+  if (!Number.isInteger(off) || off < 0 || !(total > 0) || total > PPT_VIDEO_MAX) return res.status(400).json({ error: 'bad off/total' });
+  if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'empty body' });
+  fs.mkdirSync(PPT_VIDEO_DIR, { recursive: true });
+  const part = path.join(PPT_VIDEO_DIR, `${row.id}-${n}.${ext}.part`);
+  if (off === 0) fs.writeFileSync(part, Buffer.alloc(0));
+  let cur = -1; try { cur = fs.statSync(part).size; } catch { /* 없음 */ }
+  if (cur !== off) return res.status(409).json({ error: 'offset mismatch', have: cur });
+  fs.appendFileSync(part, req.body);
+  const done = off + req.body.length >= total;
+  if (done) {
+    for (const e of Object.keys(PPT_VIDEO_EXT)) if (e !== ext) { try { fs.unlinkSync(path.join(PPT_VIDEO_DIR, `${row.id}-${n}.${e}`)); } catch { /* 없음 */ } }
+    fs.renameSync(part, path.join(PPT_VIDEO_DIR, `${row.id}-${n}.${ext}`));
+    logUsage(req.user.id, 'ppt_video_save', total);
+  }
+  res.json({ ok: true, done });
+});
+app.get(`${PREFIX}/api/ppts/:id/video/:n`, requireApiAuth, (req, res) => {
+  const row = db.prepare('SELECT id FROM presentations WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+  const v = row && pptVideoFind(row.id, req.params.n);
+  if (!v) return res.status(404).json({ error: 'no video' });
+  res.set('Cache-Control', 'private, max-age=3600');
+  res.type(v.mime).sendFile(v.file);
 });
 app.delete(`${PREFIX}/api/ppts/:id`, requireApiAuth, (req, res) => {
   const row = db.prepare('SELECT id FROM presentations WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
   if (!row) return res.status(404).json({ error: 'not found' });
   db.prepare('DELETE FROM presentations WHERE id=?').run(row.id);
+  pptVideoRemoveAll(row.id);
   logUsage(req.user.id, 'ppt_delete', null);
   res.json({ ok: true });
 });
@@ -2044,6 +2168,7 @@ app.get(`${PREFIX}/admin/users/:id/ppts`, requireAdmin, (req, res) => {
 app.post(`${PREFIX}/admin/ppts/:id/delete`, requireAdmin, (req, res) => {
   const ppt = db.prepare('SELECT user_id FROM presentations WHERE id=?').get(req.params.id);
   db.prepare('DELETE FROM presentations WHERE id=?').run(req.params.id);
+  pptVideoRemoveAll(req.params.id);
   res.redirect(ppt ? `${PREFIX}/admin/users/${ppt.user_id}/ppts` : `${PREFIX}/admin`);
 });
 
